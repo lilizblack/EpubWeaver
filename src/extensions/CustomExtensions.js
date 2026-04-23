@@ -45,7 +45,7 @@ export const LineHeight = Extension.create({
   addOptions() {
     return {
       types: ['paragraph', 'heading'],
-      defaultLineHeight: '1.6',
+      defaultLineHeight: '1.2',
     };
   },
   addGlobalAttributes() {
@@ -121,7 +121,7 @@ export const ParagraphSpacing = Extension.create({
   addOptions() {
     return {
       types: ['paragraph'],
-      defaultSpacing: '20',
+      defaultSpacing: '6',
     };
   },
   addGlobalAttributes() {
@@ -149,3 +149,26 @@ export const ParagraphSpacing = Extension.create({
     };
   },
 });
+
+// ── ResizableImage ─────────────────────────────────────────────────────────
+// Extends the base Image node with a `width` attribute so scale changes
+// are persisted in the HTML and survive save/reload.
+import { Node, mergeAttributes } from '@tiptap/core';
+import { Image as TiptapImage } from '@tiptap/extension-image';
+
+export const ResizableImage = TiptapImage.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      width: {
+        default: null,
+        parseHTML: element => element.style.width || element.getAttribute('width') || null,
+        renderHTML: attributes => {
+          if (!attributes.width) return {};
+          return { style: `width: ${attributes.width}; height: auto;` };
+        },
+      },
+    };
+  },
+});
+

@@ -33,8 +33,8 @@ import './App.css';
 // --- Constants ---
 const DEFAULT_STYLE = {
   fontSize: 16,
-  lineHeight: 1.6,
-  paragraphSpacing: 1.5,
+  lineHeight: 1.2,
+  paragraphSpacing: 0.375, // 6px / 16px
   indent: 1.0,
   fontFamily: "'Lora', serif",
   chapterColor: "#d4af37",
@@ -81,7 +81,7 @@ function App() {
       if (section.type === 'front') return;
       const parser = new DOMParser();
       const doc = parser.parseFromString(section.html, 'text/html');
-      const headings = Array.from(doc.querySelectorAll('h1, h2, h3'));
+      const headings = Array.from(doc.querySelectorAll('h1, h2'));
       headings.forEach(h => {
         entries.push({
           text: h.innerText || h.textContent,
@@ -203,6 +203,55 @@ function App() {
     reader.readAsText(file);
   };
 
+  const optimizeImage = async (blob, maxKB = 500) => {
+    // If it's already small enough, just return it
+    if (blob.size <= maxKB * 1024) return blob;
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      const url = URL.createObjectURL(blob);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Reasonably scale down if it's massive (common for original photos)
+        const maxWidth = 1600;
+        if (width > maxWidth) {
+          height = (maxWidth / width) * height;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'white'; // Avoid black background on transparent PNGs when converting to JPEG
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Recursive quality reduction
+        let quality = 0.8;
+        const compress = () => {
+          canvas.toBlob((result) => {
+            if (result.size <= maxKB * 1024 || quality <= 0.2) {
+              resolve(result);
+            } else {
+              quality -= 0.1;
+              compress();
+            }
+          }, 'image/jpeg', quality);
+        };
+        compress();
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(blob); // Fallback to original on error
+      };
+      img.src = url;
+    });
+  };
+
   const handleExport = async () => {
     setIsExporting(true);
     try {
@@ -214,10 +263,10 @@ function App() {
 </container>`);
 
       const bookCss = `
-        @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,700;1,400&display=swap');
         body { font-family: 'Lora', serif; line-height: ${style.lineHeight}; color: #000; background: #fff; margin: 8%; }
         h1 { text-align: center; color: ${style.chapterColor}; margin-top: 2em; font-family: serif; font-size: 3em; }
         h2 { border-bottom: 2px solid ${style.chapterColor}; padding-bottom: 0.5em; margin-top: 2em; color: ${style.chapterColor}; font-family: serif; font-size: 2em; }
+        h3 { color: ${style.chapterColor}; margin-top: 1.5em; font-family: serif; font-size: 1.5em; }
         p { margin-bottom: ${style.paragraphSpacing}em; text-indent: ${style.indent}em; text-align: justify; }
         hr { border: none; border-top: 1px solid ${style.chapterColor}; width: 30%; margin: 3em auto; opacity: 0.3; }
         blockquote { border-left: 4px solid ${style.chapterColor}; padding-left: 20px; font-style: italic; color: #444; margin: 1.5em 0; }
@@ -228,8 +277,10 @@ function App() {
       const chMeta = [];
       const imageManifest = [];
       let imageIdx = 0;
+      const serializer = new XMLSerializer();
 
       for (const section of sections) {
+        // Parse as HTML then serialize to XHTML
         const sectionDoc = new DOMParser().parseFromString(section.html, 'text/html');
         const images = Array.from(sectionDoc.querySelectorAll('img'));
         
@@ -238,28 +289,38 @@ function App() {
           if (src && (src.startsWith('data:') || src.startsWith('blob:') || src.startsWith('http'))) {
             try {
               const res = await fetch(src);
-              const blob = await res.blob();
+              let blob = await res.blob();
+              
+              // Apply compression if needed
+              blob = await optimizeImage(blob, 500);
+              
               const ext = blob.type.split('/')[1] || 'jpg';
-              const fileName = `img_${imageIdx++}.${ext}`;
+              const fileName = `img_${imageIdx}.${ext}`;
+              const imgId = `img${imageIdx}`;
+              
               zip.file(`OEBPS/images/${fileName}`, blob);
               img.setAttribute('src', `images/${fileName}`);
-              imageManifest.push(`<item id="img${imageIdx}" href="images/${fileName}" media-type="${blob.type}"/>`);
+              imageManifest.push(`<item id="${imgId}" href="images/${fileName}" media-type="${blob.type}"/>`);
+              imageIdx++;
             } catch (err) { console.warn('Image fetch failed'); }
           }
         }
 
-        const processedHtml = sectionDoc.body.innerHTML;
+        // Serialize the body content to ensure valid XHTML (self-closing tags, etc.)
+        const serializedBody = serializer.serializeToString(sectionDoc.body)
+          .replace(/^<body[^>]*>/, '')
+          .replace(/<\/body>$/, '');
 
         const xhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${metadata.language || 'en'}" xml:lang="${metadata.language || 'en'}">
 <head>
     <title>${section.title}</title>
     <link rel="stylesheet" type="text/css" href="style.css"/>
 </head>
 <body>
     <section epub:type="${section.type === 'front' ? 'frontmatter' : section.type === 'back' ? 'backmatter' : 'chapter'}">
-        ${processedHtml}
+        ${serializedBody}
     </section>
 </body>
 </html>`;
@@ -268,13 +329,12 @@ function App() {
         chMeta.push({ id: section.id, fileName, title: section.title, type: section.type });
       }
 
-      // Only include Body and Back matter in the Table of Contents as per standard practice & user request
       const tocListItems = chMeta.filter(c => c.type === 'body' || c.type === 'back');
 
-      // EPUB 3 Navigation
+      // EPUB 3 Navigation Document
       const nav = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${metadata.language || 'en'}" xml:lang="${metadata.language || 'en'}">
 <head>
     <title>Table of Contents</title>
     <link rel="stylesheet" type="text/css" href="style.css"/>
@@ -290,15 +350,35 @@ function App() {
 </html>`;
       zip.file('OEBPS/nav.xhtml', nav);
 
-      // Handle Cover Art
+      // NCX Fallback for legacy iBooks / Kindle / EPUB 2 readers
+      const ncx = `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+    <head>
+        <meta name="dtb:uid" content="urn:uuid:book-id"/>
+        <meta name="dtb:depth" content="1"/>
+        <meta name="dtb:totalPageCount" content="0"/>
+        <meta name="dtb:maxPageNumber" content="0"/>
+    </head>
+    <docTitle><text>${metadata.title}</text></docTitle>
+    <navMap>
+        ${tocListItems.map((c, i) => `
+        <navPoint id="navpoint-${i + 1}" playOrder="${i + 1}">
+            <navLabel><text>${c.title}</text></navLabel>
+            <content src="${c.fileName}"/>
+        </navPoint>`).join('\n')}
+    </navMap>
+</ncx>`;
+      zip.file('OEBPS/toc.ncx', ncx);
+
       if (metadata.coverArt) {
         try {
           const res = await fetch(metadata.coverArt);
-          const blob = await res.blob();
+          let blob = await res.blob();
+          blob = await optimizeImage(blob, 500);
           zip.file('OEBPS/images/cover.jpg', blob);
           const coverXhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="${metadata.language || 'en'}" xml:lang="${metadata.language || 'en'}">
 <head><title>Cover</title><style>body { margin: 0; padding: 0; text-align: center; background-color: #000; } img { max-width: 100%; max-height: 100%; }</style></head>
 <body><img src="images/cover.jpg" alt="Cover"/></body>
 </html>`;
@@ -311,10 +391,10 @@ function App() {
         ...chMeta.map(c => `<item id="${c.id}" href="${c.fileName}" media-type="application/xhtml+xml"/>`),
         ...imageManifest,
         `<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`,
+        `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`,
         `<item id="css" href="style.css" media-type="text/css"/>`
       ].join('\n');
 
-      // SPINE ORDER: Cover -> Front Matter -> TOC -> Body -> Back Matter
       const frontRefs = chMeta.filter(c => c.type === 'front').map(c => `<itemref idref="${c.id}"/>`);
       const bodyRefs = chMeta.filter(c => c.type === 'body').map(c => `<itemref idref="${c.id}"/>`);
       const backRefs = chMeta.filter(c => c.type === 'back').map(c => `<itemref idref="${c.id}"/>`);
@@ -322,7 +402,7 @@ function App() {
       let finalSpineRefs = [];
       if (metadata.coverArt) finalSpineRefs.push('<itemref idref="cover"/>');
       finalSpineRefs.push(...frontRefs);
-      finalSpineRefs.push('<itemref idref="nav"/>'); // TOC always after front matter
+      finalSpineRefs.push('<itemref idref="nav"/>');
       finalSpineRefs.push(...bodyRefs);
       finalSpineRefs.push(...backRefs);
       
@@ -333,14 +413,14 @@ function App() {
         <dc:title>${metadata.title}</dc:title>
         <dc:creator>${metadata.author}</dc:creator>
         <dc:language>${metadata.language}</dc:language>
-        <dc:publisher>${metadata.publisher}</dc:publisher>
+        <dc:publisher>${metadata.publisher || 'EPUBSmith'}</dc:publisher>
         <meta property="dcterms:modified">${new Date().toISOString().replace(/\.[0-9]+Z$/, 'Z')}</meta>
         ${metadata.coverArt ? '<meta name="cover" content="cover-image"/>' : ''}
     </metadata>
     <manifest>
         ${manifestItems}
     </manifest>
-    <spine>
+    <spine toc="ncx">
         ${finalSpineRefs.join('\n')}
     </spine>
 </package>`;
@@ -705,7 +785,7 @@ function App() {
                     <ChevronRight size={16} className="text-secondary" />
                   </div>
                 ))}
-                {allTocEntries.length === 0 && <p className="text-center text-secondary">Use Headings (H1, H2) in the editor to populate the T.O.C.</p>}
+                {allTocEntries.length === 0 && <p className="text-center text-secondary">Use Headings (H1, H2) in the editor to populate the T.O.C. — H3 is a visual style only and is excluded.</p>}
               </div>
             </div>
           </div>
@@ -972,6 +1052,30 @@ function App() {
                       value={metadata.language} 
                       onChange={e => setMetadata({...metadata, language: e.target.value})}
                     />
+                  </div>
+
+                  <div className="settings-section col-span-2">
+                    <label>Manuscript Aesthetics</label>
+                    <div className="flex items-center gap-6 p-4 glass rounded-xl mt-2">
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[10px] uppercase tracking-wider opacity-50">Heading Color (Chapters & Titles)</span>
+                        <div className="flex items-center gap-3">
+                          <input 
+                            type="color" 
+                            className="w-12 h-12 bg-transparent border-none cursor-pointer p-0" 
+                            value={style.chapterColor} 
+                            onChange={e => setStyle({...style, chapterColor: e.target.value})}
+                          />
+                          <span className="text-sm font-mono gold-text">{style.chapterColor}</span>
+                        </div>
+                      </div>
+                      <div className="divider-v h-10 w-px bg-white/10" />
+                      <div className="flex-1">
+                        <p className="text-[10px] text-secondary leading-relaxed">
+                          This color applies to all H1 and H2 headings in both the editor and the final EPUB export.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
