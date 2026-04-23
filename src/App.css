@@ -121,6 +121,53 @@ body {
   background: #080808;
 }
 
+/* Editor scroll container — must have height constraints for wheel scroll to work */
+.editor-layout-main {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+.editor-scroller {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(212, 175, 55, 0.25) transparent;
+}
+
+.editor-scroller::-webkit-scrollbar {
+  width: 7px;
+}
+
+.editor-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.editor-scroller::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.25);
+  border-radius: 10px;
+}
+
+.editor-scroller::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.5);
+}
+
+.manuscript-editor-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+
 .main-header {
   height: var(--header-height);
   padding: 0 32px;
@@ -141,6 +188,13 @@ body {
   height: 100%;
   width: 100%;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.tab-pane.scrollable {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .tab-pane.center {
@@ -149,10 +203,34 @@ body {
   justify-content: center;
 }
 
-.tab-pane.scrollable {
-  overflow-y: auto;
-  max-height: calc(100vh - var(--header-height));
+.content-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.2);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.4);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 
 .glass {
   background: var(--glass-bg);

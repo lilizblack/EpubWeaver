@@ -20,7 +20,8 @@ import {
   ChevronUp,
   ChevronDown,
   GripVertical,
-  X
+  X,
+  Save
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import mammoth from 'mammoth';
@@ -554,9 +555,12 @@ function App() {
         </div>
       )}
 
-      <div className="sidebar-footer">
-        <button className="btn-primary w-full" onClick={handleExport} disabled={isExporting}>
-          {isExporting ? 'Processing...' : <><Download size={18} /> Download EPUB</>}
+      <div className="sidebar-footer shrink-0 flex flex-col gap-2 p-5 bg-[#0a0a0a] border-t border-white/5 shadow-[0_-10px_20px_rgba(0,0,0,0.3)]">
+        <button className="btn-secondary w-full justify-center text-xs py-2.5 h-10 hover:bg-white/10" onClick={saveWorkspace}>
+          <Save size={14} className="text-accent" /> Save Workspace
+        </button>
+        <button className="btn-primary w-full text-xs py-2.5 h-10 shadow-lg shadow-gold/10" onClick={handleExport} disabled={isExporting}>
+          {isExporting ? 'Processing...' : <><Download size={16} /> Download EPUB</>}
         </button>
       </div>
     </div>
@@ -647,11 +651,11 @@ function App() {
             </div>
           </div>
         );
-      case 'styles':
+      case 'styles': {
         const activeSection = sections.find(s => s.id === activeSectionId) || sections[0];
         return (
-          <div className="tab-pane p-8 flex flex-col h-full">
-            <div className="section-header flex items-center justify-between mb-6 px-4">
+          <div style={{ display: 'grid', gridTemplateRows: 'auto 1fr', height: '100%', overflow: 'hidden' }}>
+            <div className="section-header flex items-center justify-between mb-4 px-4 pt-5">
               <div className="flex items-center gap-4">
                 <input 
                   type="text"
@@ -668,7 +672,7 @@ function App() {
               </div>
             </div>
             
-            <div className="editor-view-container flex-1 overflow-hidden">
+            <div className="editor-view-container" style={{ overflow: 'hidden', minHeight: 0 }}>
               <ManuscriptEditor 
                 key={activeSection.id}
                 content={activeSection.html}
@@ -679,6 +683,7 @@ function App() {
             </div>
           </div>
         );
+      }
       case 'toc':
         return (
           <div className="tab-pane scrollable p-8">
@@ -862,25 +867,41 @@ function App() {
     <div className="app-container">
       {renderSidebar()}
       <main className="main-content">
-        <header className="main-header glass">
-          <div className="header-status">
+        <header className="main-header glass sticky top-0 z-[100]">
+          <div className="header-status flex items-center gap-4">
             <div className="project-chip">
               <span className="dot" />
               {metadata.title}
             </div>
           </div>
-          <div className="header-actions">
-            <button className="btn-secondary" onClick={() => setShowSettings(true)}>
-              <Settings size={18} />
-              Settings
+          <div className="header-actions flex items-center gap-3">
+            <button 
+              className="btn-secondary h-10 px-4 flex items-center gap-2 bg-white/5 border-white/10 hover:bg-white/10"
+              onClick={saveWorkspace}
+              title="Save Workspace"
+            >
+              <Save size={16} className="text-accent" />
+              <span className="hidden md:inline">Save</span>
             </button>
-            <button className="btn-primary" onClick={handleExport}>
-              Export Final
+            <button 
+              className="btn-secondary h-10 px-4 flex items-center gap-2 bg-white/5 border-white/10 hover:bg-white/10" 
+              onClick={() => setShowSettings(true)}
+            >
+              <Settings size={16} />
+              <span className="hidden md:inline">Settings</span>
+            </button>
+            <div className="divider-v h-6 w-px bg-white/10 mx-1" />
+            <button 
+              className="btn-primary h-10 px-6 shadow-lg shadow-gold/20"
+              onClick={handleExport}
+              disabled={isExporting}
+            >
+              {isExporting ? 'Processing...' : 'Export Final'}
             </button>
           </div>
         </header>
 
-        <section className="content-area">
+        <section className="content-area flex-1 min-h-0 overflow-hidden relative">
           {renderContent()}
         </section>
       </main>

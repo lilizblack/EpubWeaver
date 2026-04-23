@@ -38,6 +38,81 @@ import {
 const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) => {
   const [showTypography, setShowTypography] = React.useState(false);
   const [, setSelectionUpdate] = React.useState(0);
+  const containerRef = React.useRef(null);
+  const toolbarRef = React.useRef(null);
+  const scrollerRef = React.useRef(null);
+
+  // Force explicit pixel height on the scroller so overflow-y:auto works
+  React.useEffect(() => {
+    const updateHeight = () => {
+      if (!containerRef.current || !toolbarRef.current || !scrollerRef.current) return;
+      const containerH = containerRef.current.getBoundingClientRect().height;
+      const toolbarH = toolbarRef.current.getBoundingClientRect().height;
+      const newH = containerH - toolbarH;
+      if (newH > 0) scrollerRef.current.style.height = `${newH}px`;
+    };
+
+    updateHeight();
+    // Small delay on first run to ensure layout is complete
+    const t = setTimeout(updateHeight, 50);
+    const ro = new ResizeObserver(updateHeight);
+    if (containerRef.current) ro.observe(containerRef.current);
+    window.addEventListener('resize', updateHeight);
+    return () => {
+      clearTimeout(t);
+      ro.disconnect();
+      window.removeEventListener('resize', updateHeight);
+    };
+  }, [showTypography]);
+
+  // Auto-scroll the canvas when dragging a text selection near the edges
+  React.useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+
+    let animFrameId = null;
+    let mouseY = 0;
+    let isDragging = false;
+    const EDGE_ZONE = 80; // px from edge to trigger scroll
+    const MAX_SPEED = 12; // max px per frame
+
+    const autoScroll = () => {
+      if (!isDragging) return;
+      const rect = scroller.getBoundingClientRect();
+      const distFromTop = mouseY - rect.top;
+      const distFromBottom = rect.bottom - mouseY;
+
+      if (distFromTop < EDGE_ZONE && distFromTop > 0) {
+        const speed = ((EDGE_ZONE - distFromTop) / EDGE_ZONE) * MAX_SPEED;
+        scroller.scrollTop -= speed;
+      } else if (distFromBottom < EDGE_ZONE && distFromBottom > 0) {
+        const speed = ((EDGE_ZONE - distFromBottom) / EDGE_ZONE) * MAX_SPEED;
+        scroller.scrollTop += speed;
+      }
+      animFrameId = requestAnimationFrame(autoScroll);
+    };
+
+    const onMouseMove = (e) => { mouseY = e.clientY; };
+    const onMouseDown = () => {
+      isDragging = true;
+      animFrameId = requestAnimationFrame(autoScroll);
+    };
+    const onMouseUp = () => {
+      isDragging = false;
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+    };
+
+    scroller.addEventListener('mousemove', onMouseMove);
+    scroller.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      scroller.removeEventListener('mousemove', onMouseMove);
+      scroller.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('mouseup', onMouseUp);
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+    };
+  }, []);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -96,153 +171,162 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
   };
 
   return (
-    <div className="manuscript-editor-container">
-      <div className="editor-toolbar glass mb-4">
-        <div className="toolbar-group">
-          <button 
-            onClick={() => editor.chain().focus().toggleBold().run()} 
-            className={editor.isActive('bold') ? 'active' : ''}
-          >
-            <Bold size={18} />
-          </button>
-          <button 
-            onClick={() => editor.chain().focus().toggleItalic().run()} 
-            className={editor.isActive('italic') ? 'active' : ''}
-          >
-            <Italic size={18} />
-          </button>
-          <button 
-            onClick={() => editor.chain().focus().toggleUnderline().run()} 
-            className={editor.isActive('underline') ? 'active' : ''}
-          >
-            <UnderlineIcon size={18} />
-          </button>
-        </div>
-
-        <div className="divider" />
-
-        <div className="toolbar-group">
-          <button 
-            onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} 
-            className={editor.isActive('heading', { level: 1 }) ? 'active' : ''}
-          >
-            <Heading1 size={18} />
-          </button>
-          <button 
-            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} 
-            className={editor.isActive('heading', { level: 2 }) ? 'active' : ''}
-          >
-            <Heading2 size={18} />
-          </button>
-          <button 
-            onClick={() => editor.chain().focus().toggleBlockquote().run()} 
-            className={editor.isActive('blockquote') ? 'active' : ''}
-          >
-            <Quote size={18} />
-          </button>
-        </div>
-        
-        <div className="divider" />
-        
-        <div className="toolbar-group">
-          <button 
-            onClick={() => editor.chain().focus().setTextAlign('left').run()} 
-            className={editor.isActive({ textAlign: 'left' }) ? 'active' : ''}
-          >
-            <AlignLeft size={18} />
-          </button>
-          <button 
-            onClick={() => editor.chain().focus().setTextAlign('center').run()} 
-            className={editor.isActive({ textAlign: 'center' }) ? 'active' : ''}
-          >
-            <AlignCenter size={18} />
-          </button>
-          <button 
-            onClick={() => editor.chain().focus().setTextAlign('right').run()} 
-            className={editor.isActive({ textAlign: 'right' }) ? 'active' : ''}
-          >
-            <AlignRight size={18} />
-          </button>
-          <button 
-            onClick={() => editor.chain().focus().setTextAlign('justify').run()} 
-            className={editor.isActive({ textAlign: 'justify' }) ? 'active' : ''}
-          >
-            <AlignJustify size={18} />
-          </button>
-           <button 
-             onClick={() => editor.chain().focus().setIndent(1.0).run()}
-             className={editor.getAttributes('paragraph').indent === 1.0 ? 'active' : ''}
-             title="Apply First Line Indent (1.0em)"
-           >
-             <ArrowRightFromLine size={18} />
-           </button>
-           <button 
-             onClick={() => editor.chain().focus().setHorizontalRule().run()}
-             title="Scene Divider"
-           >
-             <Minus size={18} />
-           </button>
-        </div>
-
-        <div className="divider" />
-        
-        <div className="toolbar-group">
-          <button onClick={addImage} title="Add Image">
-            <ImageIcon size={18} />
-          </button>
-        </div>
-
-        <div className="divider" />
-        
-        <div className="toolbar-group">
-          <button 
-            onClick={() => setShowTypography(!showTypography)} 
-            className={showTypography ? 'active' : ''}
-            title="Typography & Formatting"
-          >
-            <Settings size={18} />
-          </button>
-        </div>
-      </div>
-
-      <div className="editor-main-layout flex-1 flex overflow-hidden">
-        <div className="editor-workspace-scroll flex-1 overflow-y-auto relative p-8 flex flex-col items-center">
-          {editor && (
-            <BubbleMenu editor={editor} tippyOptions={{ duration: 100 }} className="bubble-menu glass p-1 rounded-lg flex gap-1">
+    <div ref={containerRef} className="manuscript-editor-container relative">
+      {/* 1. STICKY TOPBAR */}
+      <div ref={toolbarRef} className="editor-top-nav glass sticky top-0 z-[60] p-3 border-b border-white/5 flex items-center justify-between shadow-2xl shrink-0">
+        <div className="flex items-center gap-4 mx-auto min-w-0">
+          <div className="editor-toolbar flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10 overflow-x-auto no-scrollbar">
+            <div className="toolbar-group">
               <button 
                 onClick={() => editor.chain().focus().toggleBold().run()} 
-                className={editor.isActive('bold') ? 'active bg-accent/20 text-accent' : 'hover:bg-white/10'}
+                className={editor.isActive('bold') ? 'active' : ''}
               >
-                <Bold size={16} />
+                <Bold size={18} />
               </button>
               <button 
                 onClick={() => editor.chain().focus().toggleItalic().run()} 
-                className={editor.isActive('italic') ? 'active bg-accent/20 text-accent' : 'hover:bg-white/10'}
+                className={editor.isActive('italic') ? 'active' : ''}
               >
-                <Italic size={16} />
+                <Italic size={18} />
+              </button>
+              <button 
+                onClick={() => editor.chain().focus().toggleUnderline().run()} 
+                className={editor.isActive('underline') ? 'active' : ''}
+              >
+                <UnderlineIcon size={18} />
+              </button>
+            </div>
+
+            <div className="divider" />
+
+            <div className="toolbar-group">
+              <button 
+                onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} 
+                className={editor.isActive('heading', { level: 1 }) ? 'active' : ''}
+              >
+                <Heading1 size={18} />
               </button>
               <button 
                 onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} 
-                className={editor.isActive('heading', { level: 2 }) ? 'active bg-accent/20 text-accent' : 'hover:bg-white/10'}
+                className={editor.isActive('heading', { level: 2 }) ? 'active' : ''}
               >
-                <Heading2 size={16} />
+                <Heading2 size={18} />
+              </button>
+              <button 
+                onClick={() => editor.chain().focus().toggleBlockquote().run()} 
+                className={editor.isActive('blockquote') ? 'active' : ''}
+              >
+                <Quote size={18} />
+              </button>
+            </div>
+            
+            <div className="divider" />
+            
+            <div className="toolbar-group">
+              <button 
+                onClick={() => editor.chain().focus().setTextAlign('left').run()} 
+                className={editor.isActive({ textAlign: 'left' }) ? 'active' : ''}
+              >
+                <AlignLeft size={18} />
+              </button>
+              <button 
+                onClick={() => editor.chain().focus().setTextAlign('center').run()} 
+                className={editor.isActive({ textAlign: 'center' }) ? 'active' : ''}
+              >
+                <AlignCenter size={18} />
+              </button>
+              <button 
+                onClick={() => editor.chain().focus().setTextAlign('right').run()} 
+                className={editor.isActive({ textAlign: 'right' }) ? 'active' : ''}
+              >
+                <AlignRight size={18} />
               </button>
               <button 
                 onClick={() => editor.chain().focus().setTextAlign('justify').run()} 
-                className={editor.isActive({ textAlign: 'justify' }) ? 'active bg-accent/20 text-accent' : 'hover:bg-white/10'}
+                className={editor.isActive({ textAlign: 'justify' }) ? 'active' : ''}
               >
-                <AlignJustify size={16} />
+                <AlignJustify size={18} />
               </button>
-            </BubbleMenu>
-          )}
+               <button 
+                 onClick={() => editor.chain().focus().setIndent(1.0).run()}
+                 className={editor.getAttributes('paragraph').indent === 1.0 ? 'active' : ''}
+                 title="Apply First Line Indent (1.0em)"
+               >
+                 <ArrowRightFromLine size={18} />
+               </button>
+               <button 
+                 onClick={() => editor.chain().focus().setHorizontalRule().run()}
+                 title="Scene Divider"
+               >
+                 <Minus size={18} />
+               </button>
+            </div>
 
-          <div className="editor-parchment parchment relative w-full max-w-[850px] min-h-full p-16 shadow-2xl">
-            <EditorContent editor={editor} />
+            <div className="divider" />
+            
+            <div className="toolbar-group">
+              <button onClick={addImage} title="Add Image">
+                <ImageIcon size={18} />
+              </button>
+            </div>
+
+            <div className="divider" />
+            
+            <div className="toolbar-group">
+              <button 
+                onClick={() => setShowTypography(!showTypography)} 
+                className={showTypography ? 'active' : ''}
+                title="Typography & Formatting"
+              >
+                <Settings size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="editor-layout-main flex-1 flex min-h-0 bg-[#080808]" style={{ overflow: 'hidden' }}>
+        {/* 2. SCROLLABLE WRITING CANVAS */}
+        <div ref={scrollerRef} className="editor-scroller" style={{ overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain' }}>
+          <div className="parchment-container py-12 px-4 md:px-12 flex justify-center">
+            {editor && (
+              <BubbleMenu editor={editor} tippyOptions={{ duration: 100 }} className="bubble-menu glass p-1 rounded-lg flex gap-1">
+                <button 
+                  onClick={() => editor.chain().focus().toggleBold().run()} 
+                  className={editor.isActive('bold') ? 'active bg-accent/20 text-accent' : 'hover:bg-white/10'}
+                >
+                  <Bold size={16} />
+                </button>
+                <button 
+                  onClick={() => editor.chain().focus().toggleItalic().run()} 
+                  className={editor.isActive('italic') ? 'active bg-accent/20 text-accent' : 'hover:bg-white/10'}
+                >
+                  <Italic size={16} />
+                </button>
+                <button 
+                  onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} 
+                  className={editor.isActive('heading', { level: 2 }) ? 'active bg-accent/20 text-accent' : 'hover:bg-white/10'}
+                >
+                  <Heading2 size={16} />
+                </button>
+                <button 
+                  onClick={() => editor.chain().focus().setTextAlign('justify').run()} 
+                  className={editor.isActive({ textAlign: 'justify' }) ? 'active bg-accent/20 text-accent' : 'hover:bg-white/10'}
+                >
+                  <AlignJustify size={16} />
+                </button>
+              </BubbleMenu>
+            )}
+
+            <div className="editor-parchment parchment relative w-full max-w-[850px] min-h-[1100px] shadow-[0_30px_100px_rgba(0,0,0,0.5)]">
+              <EditorContent editor={editor} />
+            </div>
           </div>
         </div>
 
+        {/* 3. SIDE TYPOGRAPHY PANEL */}
         {showTypography && (
-          <div className="typography-panel glass w-72 p-6 overflow-y-auto animate-fade-in border-l border-white/5">
+          <div className="typography-panel glass w-72 p-6 overflow-y-auto animate-slide-in border-l border-white/5 shrink-0 bg-[#0a0a0a]">
             <h3 className="gold-text text-sm uppercase tracking-widest font-bold mb-6 flex items-center gap-2">
               <Type size={16} /> Typography
             </h3>
@@ -331,33 +415,29 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
               </div>
 
               <div className="pt-4 border-t border-white/10">
-                <p className="text-[10px] uppercase tracking-tighter text-secondary mb-4">Text Styles</p>
+                <p className="text-[10px] uppercase tracking-tighter text-secondary mb-4">Quick Styles</p>
                 <div className="grid grid-cols-4 gap-2">
                   <button 
                     onClick={() => editor.chain().focus().toggleBold().run()}
                     className={`p-2 rounded ${editor?.isActive('bold') ? 'bg-accent/20 text-accent border border-accent/30' : 'bg-white/5 border border-white/5'}`}
-                    title="Bold"
                   >
                     <Bold size={16} />
                   </button>
                   <button 
                     onClick={() => editor.chain().focus().toggleItalic().run()}
                     className={`p-2 rounded ${editor?.isActive('italic') ? 'bg-accent/20 text-accent border border-accent/30' : 'bg-white/5 border border-white/5'}`}
-                    title="Italic"
                   >
                     <Italic size={16} />
                   </button>
                   <button 
                     onClick={() => editor.chain().focus().toggleUnderline().run()}
                     className={`p-2 rounded ${editor?.isActive('underline') ? 'bg-accent/20 text-accent border border-accent/30' : 'bg-white/5 border border-white/5'}`}
-                    title="Underline"
                   >
                     <UnderlineIcon size={16} />
                   </button>
                   <button 
                     onClick={() => editor.chain().focus().toggleHighlight().run()}
                     className={`p-2 rounded ${editor?.isActive('highlight') ? 'bg-accent/20 text-accent border border-accent/30' : 'bg-white/5 border border-white/5'}`}
-                    title="Highlight"
                   >
                     <Plus size={16} />
                   </button>
@@ -380,10 +460,15 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
         }
 
         .typography-panel {
-          height: 100%;
-          background: rgba(10,10,10,0.8);
-          backdrop-filter: blur(20px);
-          z-index: 10;
+          position: absolute;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          width: 300px;
+          background: #0a0a0a;
+          border-left: 1px solid var(--border-color);
+          z-index: 100;
+          box-shadow: -10px 0 30px rgba(0,0,0,0.5);
         }
 
         .accent-gold {
@@ -481,11 +566,14 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
         .editor-toolbar {
           display: flex;
           gap: 12px;
-          padding: 8px 16px;
+          padding: 8px 24px;
           border-radius: 12px;
           align-items: center;
-          background: var(--glass-bg);
-          backdrop-filter: blur(10px);
+          background: rgba(15, 15, 15, 0.85);
+          backdrop-filter: blur(15px);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          width: fit-content;
+          margin-bottom: 2rem;
         }
 
         .toolbar-group {
