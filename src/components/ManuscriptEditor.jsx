@@ -170,9 +170,9 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
             <AlignJustify size={18} />
           </button>
            <button 
-             onClick={() => editor.chain().focus().setIndent(0.2).run()}
-             className={editor.getAttributes('paragraph').indent === 0.2 ? 'active' : ''}
-             title="Apply First Line Indent (0.2em)"
+             onClick={() => editor.chain().focus().setIndent(1.0).run()}
+             className={editor.getAttributes('paragraph').indent === 1.0 ? 'active' : ''}
+             title="Apply First Line Indent (1.0em)"
            >
              <ArrowRightFromLine size={18} />
            </button>
@@ -286,11 +286,11 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
 
               <div className="control-group">
                 <label className="text-xs font-medium text-slate-400 block mb-2">
-                  First Line Indent ({editor?.getAttributes('paragraph').indent || 0.2}em)
+                  First Line Indent ({editor?.getAttributes('paragraph').indent || 1.0}em)
                 </label>
                 <input 
-                  type="range" min="0.2" max="4" step="0.1"
-                  value={editor?.getAttributes('paragraph').indent ?? 0.2}
+                  type="range" min="0" max="4" step="0.1"
+                  value={editor?.getAttributes('paragraph').indent ?? 1.0}
                   onChange={e => editor.chain().focus().setIndent(parseFloat(e.target.value)).run()}
                   className="w-full accent-gold"
                 />

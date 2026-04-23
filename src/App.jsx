@@ -16,7 +16,11 @@ import {
   Monitor,
   ChevronLeft,
   ChevronRight,
-  Edit2
+  Edit2,
+  ChevronUp,
+  ChevronDown,
+  GripVertical,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import mammoth from 'mammoth';
@@ -30,7 +34,7 @@ const DEFAULT_STYLE = {
   fontSize: 16,
   lineHeight: 1.6,
   paragraphSpacing: 1.5,
-  indent: 1.5,
+  indent: 1.0,
   fontFamily: "'Lora', serif",
   chapterColor: "#d4af37",
   textColor: "#e0e0e0"
@@ -47,7 +51,6 @@ function App() {
     { id: 'about-author', title: 'About Author', type: 'back', html: '<h1>About the Author</h1><p>Author biography here...</p>' }
   ]);
   const [activeSectionId, setActiveSectionId] = useState('chapter-1');
-  const [tocEntries, setTocEntries] = useState([]); 
   const [metadata, setMetadata] = useState({
     title: 'Untitled Masterpiece',
     author: 'Anonymous',
@@ -58,16 +61,45 @@ function App() {
   });
   const [style, setStyle] = useState(DEFAULT_STYLE);
   const [activeTab, setActiveTab] = useState('upload');
+  const [previewMode, setPreviewMode] = useState('paginated'); // 'paginated' or 'vertical'
   const [editingSectionId, setEditingSectionId] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
   const [notification, setNotification] = useState(null);
   const [imageSettings, setImageSettings] = useState({});
   const [editingTitleId, setEditingTitleId] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   // --- Refs ---
   const readerRef = useRef(null);
   const fileInputRef = useRef(null);
   const coverInputRef = useRef(null);
+
+  const allTocEntries = React.useMemo(() => {
+    const entries = [];
+    sections.forEach(section => {
+      if (section.type === 'front') return;
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(section.html, 'text/html');
+      const headings = Array.from(doc.querySelectorAll('h1, h2, h3'));
+      headings.forEach(h => {
+        entries.push({
+          text: h.innerText || h.textContent,
+          level: parseInt(h.tagName[1]),
+          sectionId: section.id,
+          sectionTitle: section.title
+        });
+      });
+    });
+    return entries;
+  }, [sections]);
+
+  // --- Effects ---
+  useEffect(() => {
+    const activePill = document.querySelector('.section-pill.active');
+    if (activePill) {
+      activePill.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [activeSectionId, activeTab]);
 
   // --- Handlers ---
   const notify = (message, type = 'success') => {
@@ -144,11 +176,35 @@ function App() {
     return chapters;
   };
 
+  const saveWorkspace = () => {
+    const data = JSON.stringify({ sections, metadata, style }, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    saveAs(blob, `${metadata.title.replace(/\s+/g, '_')}_workspace.weaver`);
+    notify('Workspace saved successfully!');
+  };
+
+  const loadWorkspace = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (data.sections) setSections(data.sections);
+        if (data.metadata) setMetadata(data.metadata);
+        if (data.style) setStyle(data.style);
+        notify('Workspace loaded successfully!');
+        setShowSettings(false);
+      } catch (err) {
+        notify('Invalid workspace file', 'error');
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handleExport = async () => {
     setIsExporting(true);
     try {
-      const doc = new DOMParser().parseFromString('<div></div>', 'text/html');
-      
       const zip = new JSZip();
       zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
       zip.file('META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8"?>
@@ -162,12 +218,14 @@ function App() {
         h1 { text-align: center; color: ${style.chapterColor}; margin-top: 2em; font-family: serif; font-size: 3em; }
         h2 { border-bottom: 2px solid ${style.chapterColor}; padding-bottom: 0.5em; margin-top: 2em; color: ${style.chapterColor}; font-family: serif; font-size: 2em; }
         p { margin-bottom: ${style.paragraphSpacing}em; text-indent: ${style.indent}em; text-align: justify; }
+        hr { border: none; border-top: 1px solid ${style.chapterColor}; width: 30%; margin: 3em auto; opacity: 0.3; }
         blockquote { border-left: 4px solid ${style.chapterColor}; padding-left: 20px; font-style: italic; color: #444; margin: 1.5em 0; }
         img { max-width: 100%; height: auto; display: block; margin: 2em auto; }
       `;
       zip.file('OEBPS/style.css', bookCss);
 
       const chMeta = [];
+      const imageManifest = [];
       let imageIdx = 0;
 
       for (const section of sections) {
@@ -184,9 +242,12 @@ function App() {
               const fileName = `img_${imageIdx++}.${ext}`;
               zip.file(`OEBPS/images/${fileName}`, blob);
               img.setAttribute('src', `images/${fileName}`);
+              imageManifest.push(`<item id="img${imageIdx}" href="images/${fileName}" media-type="${blob.type}"/>`);
             } catch (err) { console.warn('Image fetch failed'); }
           }
         }
+
+        const processedHtml = sectionDoc.body.innerHTML;
 
         const xhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -197,7 +258,7 @@ function App() {
 </head>
 <body>
     <section epub:type="${section.type === 'front' ? 'frontmatter' : section.type === 'back' ? 'backmatter' : 'chapter'}">
-        ${section.html}
+        ${processedHtml}
     </section>
 </body>
 </html>`;
@@ -206,7 +267,8 @@ function App() {
         chMeta.push({ id: section.id, fileName, title: section.title, type: section.type });
       }
 
-      const tocListItems = chMeta.filter(c => c.id !== 'title-page' && c.id !== 'copyright' && c.id !== 'dedication');
+      // Only include Body and Back matter in the Table of Contents as per standard practice & user request
+      const tocListItems = chMeta.filter(c => c.type === 'body' || c.type === 'back');
 
       // EPUB 3 Navigation
       const nav = `<?xml version="1.0" encoding="UTF-8"?>
@@ -246,28 +308,22 @@ function App() {
       const manifestItems = [
         ...(metadata.coverArt ? ['<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>', '<item id="cover-image" href="images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>'] : []),
         ...chMeta.map(c => `<item id="${c.id}" href="${c.fileName}" media-type="application/xhtml+xml"/>`),
+        ...imageManifest,
         `<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`,
         `<item id="css" href="style.css" media-type="text/css"/>`
       ].join('\n');
 
-      // Insert TOC after all Front Matter
-      const lastFrontIndex = chMeta.reduce((acc, c, idx) => c.type === 'front' ? idx : acc, -1);
+      // SPINE ORDER: Cover -> Front Matter -> TOC -> Body -> Back Matter
+      const frontRefs = chMeta.filter(c => c.type === 'front').map(c => `<itemref idref="${c.id}"/>`);
+      const bodyRefs = chMeta.filter(c => c.type === 'body').map(c => `<itemref idref="${c.id}"/>`);
+      const backRefs = chMeta.filter(c => c.type === 'back').map(c => `<itemref idref="${c.id}"/>`);
       
       let finalSpineRefs = [];
-      const baseRefs = chMeta.map(c => `<itemref idref="${c.id}"/>`);
-      
-      if (metadata.coverArt) {
-        finalSpineRefs.push('<itemref idref="cover"/>');
-      }
-
-      if (lastFrontIndex !== -1) {
-        finalSpineRefs.push(...baseRefs.slice(0, lastFrontIndex + 1));
-        finalSpineRefs.push('<itemref idref="nav"/>');
-        finalSpineRefs.push(...baseRefs.slice(lastFrontIndex + 1));
-      } else {
-        finalSpineRefs.push('<itemref idref="nav"/>');
-        finalSpineRefs.push(...baseRefs);
-      }
+      if (metadata.coverArt) finalSpineRefs.push('<itemref idref="cover"/>');
+      finalSpineRefs.push(...frontRefs);
+      finalSpineRefs.push('<itemref idref="nav"/>'); // TOC always after front matter
+      finalSpineRefs.push(...bodyRefs);
+      finalSpineRefs.push(...backRefs);
       
       const opf = `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
@@ -276,6 +332,7 @@ function App() {
         <dc:title>${metadata.title}</dc:title>
         <dc:creator>${metadata.author}</dc:creator>
         <dc:language>${metadata.language}</dc:language>
+        <dc:publisher>${metadata.publisher}</dc:publisher>
         <meta property="dcterms:modified">${new Date().toISOString().replace(/\.[0-9]+Z$/, 'Z')}</meta>
         ${metadata.coverArt ? '<meta name="cover" content="cover-image"/>' : ''}
     </metadata>
@@ -300,6 +357,27 @@ function App() {
   };
 
   // --- Section Helpers ---
+  const moveSection = (id, direction) => {
+    const index = sections.findIndex(s => s.id === id);
+    if (index === -1) return;
+    
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= sections.length) return;
+    
+    const newSections = [...sections];
+    const item = { ...newSections[index] };
+    const neighbor = newSections[newIndex];
+
+    // If crossing types, adopt the new category
+    if (item.type !== neighbor.type) {
+      item.type = neighbor.type;
+    }
+
+    newSections.splice(index, 1);
+    newSections.splice(newIndex, 0, item);
+    setSections(newSections);
+  };
+
   const addSection = (type = 'body') => {
     const id = `section-${Date.now()}`;
     const newSection = {
@@ -351,183 +429,128 @@ function App() {
 
       {/* Section Manager in Sidebar */}
       {(activeTab === 'styles' || activeTab === 'toc' || activeTab === 'preview' || activeTab === 'upload') && (
-        <div className="section-manager-sidebar border-t border-white/5 p-4 flex-1 overflow-y-auto">
+        <div className="section-manager-sidebar flex-1 overflow-y-auto custom-scrollbar">
           
-          <div className="section-manager-header mb-6">
-            <h4 className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-3 flex items-center gap-2">
-              <UploadCloud size={10} /> Actions
-            </h4>
+          <div className="section-manager-header mb-8">
+            <h4 className="section-group-title mb-4">Quick Actions</h4>
             <button 
-              className="btn-secondary w-full py-2 text-[11px] justify-center"
+              className="btn-secondary w-full py-2.5 text-[11px] justify-center bg-white/5 border-white/10 hover:bg-white/10"
               onClick={() => setActiveTab('upload')}
             >
-              <UploadCloud size={14} /> Import File
+              <UploadCloud size={14} /> Import Manuscript
             </button>
           </div>
-          {/* Front Matter Group */}
-          <div className="section-group mb-6">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-[10px] uppercase tracking-widest text-blue-400/60 font-bold">Front Matter</h4>
-              <button onClick={() => addSection('front')} className="p-1 hover:text-blue-400" title="Add Front Matter Section"><Plus size={12}/></button>
-            </div>
-            <div className="space-y-1">
-              {sections.filter(s => s.type === 'front').map(s => (                <div 
-                  key={s.id}
-                  className={`section-pill glass-sm flex items-center justify-between p-2 rounded-md cursor-pointer transition-all ${activeSectionId === s.id ? 'active bg-gold/10 border-gold/20' : 'hover:bg-white/5 border-transparent'}`}
-                  onClick={() => { setActiveTab('styles'); setActiveSectionId(s.id); }}
-                >
-                  <div className="flex items-center gap-2 overflow-hidden flex-1">
-                    <Layout size={12} className="text-gold/50 flex-shrink-0" />
-                    {editingSectionId === s.id ? (
-                      <input 
-                        autoFocus
-                        className="text-[11px] bg-white/10 border-none outline-none w-full rounded px-1"
-                        value={s.title}
-                        onChange={(e) => {
-                          const newSections = sections.map(sec => sec.id === s.id ? {...sec, title: e.target.value} : sec);
-                          setSections(newSections);
-                        }}
-                        onBlur={() => setEditingSectionId(null)}
-                        onKeyDown={(e) => e.key === 'Enter' && setEditingSectionId(null)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    ) : (
-                      <span className="text-[11px] truncate">{s.title}</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {activeSectionId === s.id && (
-                      <>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); setEditingSectionId(s.id); }} 
-                          className="hover:text-gold"
-                        >
-                          <Edit2 size={11} />
-                        </button>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); removeSection(s.id); }} 
-                          className="hover:text-red-400"
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
 
-              ))}
-            </div>
-          </div>
-
-          {/* Body Content Group */}
-          <div className="section-group mb-6">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-[10px] uppercase tracking-widest text-accent/60 font-bold">Body Content</h4>
-              <button onClick={() => addSection('body')} className="p-1 hover:text-accent" title="Add Chapter"><Plus size={12}/></button>
-            </div>
-            <div className="space-y-1">
-              {sections.filter(s => s.type === 'body').map(s => (
-                <div 
-                  key={s.id}
-                  className={`section-pill glass-sm flex items-center justify-between p-2 rounded-md cursor-pointer transition-all ${activeSectionId === s.id ? 'active bg-accent/10 border-accent/20' : 'hover:bg-white/5 border-transparent'}`}
-                  onClick={() => { setActiveTab('styles'); setActiveSectionId(s.id); }}
+          {[
+            { id: 'front', label: 'Front Matter', icon: <Layout size={12} className="pill-icon" /> },
+            { id: 'body', label: 'Body Content', icon: <BookOpen size={12} className="pill-icon" /> },
+            { id: 'back', label: 'Back Matter', icon: <AlignLeft size={12} className="pill-icon" /> }
+          ].map(group => (
+            <div key={group.id} className="section-group mb-8">
+              <div className="section-group-header">
+                <h4 className={`section-group-title ${group.id === 'front' ? 'text-blue-400/80' : group.id === 'body' ? 'text-accent' : 'text-purple-400/80'}`}>
+                  {group.label}
+                </h4>
+                <button 
+                  onClick={() => addSection(group.id)} 
+                  className="p-1 hover:text-white transition-colors" 
+                  title={`Add ${group.label}`}
                 >
-                  <div className="flex items-center gap-2 overflow-hidden flex-1">
-                    <BookOpen size={12} className="text-accent/50 flex-shrink-0" />
-                    {editingSectionId === s.id ? (
-                      <input 
-                        autoFocus
-                        className="text-[11px] bg-white/10 border-none outline-none w-full rounded px-1"
-                        value={s.title}
-                        onChange={(e) => {
-                          const newSections = sections.map(sec => sec.id === s.id ? {...sec, title: e.target.value} : sec);
-                          setSections(newSections);
-                        }}
-                        onBlur={() => setEditingSectionId(null)}
-                        onKeyDown={(e) => e.key === 'Enter' && setEditingSectionId(null)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    ) : (
-                      <span className="text-[11px] truncate">{s.title}</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {activeSectionId === s.id && (
-                      <>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); setEditingSectionId(s.id); }} 
-                          className="hover:text-accent"
-                        >
-                          <Edit2 size={11} />
-                        </button>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); removeSection(s.id); }} 
-                          className="hover:text-red-400"
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+                  <Plus size={14}/>
+                </button>
+              </div>
+              
+              <div className="flex flex-col gap-1">
+                {sections.filter(s => s.type === group.id).map((s, idx, filtered) => (
+                  <div 
+                    key={s.id}
+                    className={`section-pill ${activeSectionId === s.id ? 'active' : ''}`}
+                    onClick={() => { setActiveTab('styles'); setActiveSectionId(s.id); }}
+                  >
+                    <GripVertical size={12} className="drag-handle" />
+                    
+                    <div className="flex-1 min-w-0">
+                      {editingSectionId === s.id ? (
+                        <div className="flex flex-col gap-2" onClick={e => e.stopPropagation()}>
+                          <input 
+                            autoFocus
+                            className="section-title-input"
+                            value={s.title}
+                            onChange={(e) => {
+                              const newSections = sections.map(sec => sec.id === s.id ? {...sec, title: e.target.value} : sec);
+                              setSections(newSections);
+                            }}
+                            onBlur={() => setEditingSectionId(null)}
+                            onKeyDown={(e) => e.key === 'Enter' && setEditingSectionId(null)}
+                          />
+                          <div className="flex gap-1">
+                            {['front', 'body', 'back'].map(t => (
+                              <button
+                                key={t}
+                                onClick={() => {
+                                  setSections(sections.map(sec => sec.id === s.id ? {...sec, type: t} : sec));
+                                }}
+                                className={`text-[9px] px-2 py-0.5 rounded capitalize ${s.type === t ? 'bg-accent/40 text-white' : 'bg-white/5 hover:bg-white/10'}`}
+                              >
+                                {t}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          {group.icon}
+                          <span className="text-[12px] truncate font-semibold text-white/90">{s.title}</span>
+                        </div>
+                      )}
+                    </div>
 
-          {/* Back Matter Group */}
-          <div className="section-group mb-4">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-[10px] uppercase tracking-widest text-purple-400/60 font-bold">Back Matter</h4>
-              <button onClick={() => addSection('back')} className="p-1 hover:text-purple-400" title="Add Back Matter Section"><Plus size={12}/></button>
-            </div>
-            <div className="space-y-1">
-              {sections.filter(s => s.type === 'back').map(s => (
-                <div 
-                  key={s.id}
-                  className={`section-pill glass-sm flex items-center justify-between p-2 rounded-md cursor-pointer transition-all ${activeSectionId === s.id ? 'active bg-purple-400/10 border-purple-400/20' : 'hover:bg-white/5 border-transparent'}`}
-                  onClick={() => { setActiveTab('styles'); setActiveSectionId(s.id); }}
-                >
-                  <div className="flex items-center gap-2 overflow-hidden flex-1">
-                    <FileText size={12} className="text-purple-400/50 flex-shrink-0" />
-                    {editingSectionId === s.id ? (
-                      <input 
-                        autoFocus
-                        className="text-[11px] bg-white/10 border-none outline-none w-full rounded px-1"
-                        value={s.title}
-                        onChange={(e) => {
-                          const newSections = sections.map(sec => sec.id === s.id ? {...sec, title: e.target.value} : sec);
-                          setSections(newSections);
-                        }}
-                        onBlur={() => setEditingSectionId(null)}
-                        onKeyDown={(e) => e.key === 'Enter' && setEditingSectionId(null)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    ) : (
-                      <span className="text-[11px] truncate">{s.title}</span>
-                    )}
+                    <div className="action-buttons flex items-center gap-1">
+                      {!editingSectionId && (
+                        <>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); moveSection(s.id, -1); }}
+                            className="hover:text-accent p-1 opacity-40 hover:opacity-100 transition-opacity"
+                            disabled={sections.indexOf(s) === 0}
+                            title="Move Up"
+                          >
+                            <ChevronUp size={14} />
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); moveSection(s.id, 1); }}
+                            className="hover:text-accent p-1 opacity-40 hover:opacity-100 transition-opacity"
+                            disabled={sections.indexOf(s) === sections.length - 1}
+                            title="Move Down"
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setEditingSectionId(s.id); }} 
+                            className="hover:text-accent p-1 opacity-40 hover:opacity-100 transition-opacity"
+                            title="Edit Title / Change Category"
+                          >
+                            <Edit2 size={12} />
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); removeSection(s.id); }} 
+                            className="hover:text-red-400 p-1 opacity-40 hover:opacity-100 transition-opacity"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    {activeSectionId === s.id && (
-                      <>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); setEditingSectionId(s.id); }} 
-                          className="hover:text-purple-400"
-                        >
-                          <Edit2 size={11} />
-                        </button>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); removeSection(s.id); }} 
-                          className="hover:text-red-400"
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      </>
-                    )}
+                ))}
+                {sections.filter(s => s.type === group.id).length === 0 && (
+                  <div className="text-[10px] text-white/20 italic p-3 text-center border border-dashed border-white/5 rounded-lg">
+                    No sections in this category
                   </div>
-                </div>
-              ))}
+                )}
+              </div>
             </div>
-          </div>
+          ))}
         </div>
       )}
 
@@ -650,7 +673,6 @@ function App() {
                 key={activeSection.id}
                 content={activeSection.html}
                 onChange={updateSectionHtml}
-                onUpdateTOC={setTocEntries}
                 style={style}
                 setStyle={setStyle}
               />
@@ -659,12 +681,12 @@ function App() {
         );
       case 'toc':
         return (
-          <div className="tab-pane p-8">
+          <div className="tab-pane scrollable p-8">
             <h2 className="section-title">Table of Contents</h2>
             <div className="toc-builder glass p-6">
               <p className="description mb-6">These links will be automatically generated and hyperlinked in your e-book.</p>
               <div className="toc-list">
-                {tocEntries.map((entry, index) => (
+                {allTocEntries.map((entry, index) => (
                   <div 
                     key={index} 
                     className={`toc-item glass mb-3 p-4 flex items-center justify-between toc-level-${entry.level}`}
@@ -675,28 +697,95 @@ function App() {
                       <span className="font-semibold text-lg">{entry.text}</span>
                       <span className="badge glass text-[10px] px-2 py-0.5 opacity-50 uppercase tracking-tighter">H{entry.level}</span>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <span className="text-secondary text-sm">Target: ch_{index + 1}.xhtml</span>
-                      <ChevronRight size={16} className="text-secondary" />
-                    </div>
+                    <ChevronRight size={16} className="text-secondary" />
                   </div>
                 ))}
-                {tocEntries.length === 0 && <p className="text-center text-secondary">Use Headings (H1, H2) in the editor to populate the T.O.C.</p>}
+                {allTocEntries.length === 0 && <p className="text-center text-secondary">Use Headings (H1, H2) in the editor to populate the T.O.C.</p>}
               </div>
             </div>
           </div>
         );
       case 'preview':
-        // Show all sections joined for the full preview
-        const combinedHtml = sections.map(s => `
-          <section class="preview-chapter">
-            <h1 class="preview-section-title" style="color: ${style.chapterColor}">${s.title}</h1>
-            ${s.html}
+        // Generate a structured preview with Cover and TOC
+        const frontMatter = sections.filter(s => s.type === 'front');
+        const bodyContent = sections.filter(s => s.type === 'body');
+        const backMatter = sections.filter(s => s.type === 'back');
+
+        let previewSections = [];
+
+        // 1. Cover Art
+        if (metadata.coverArt) {
+          previewSections.push(`
+            <section class="preview-chapter cover-page" style="display: flex; align-items: center; justify-content: center; height: 100%;">
+              <img src="${metadata.coverArt}" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);" />
+            </section>
+          `);
+        }
+
+        // 2. Front Matter
+        frontMatter.forEach(s => {
+          previewSections.push(`
+            <section class="preview-chapter">
+              <h1 class="preview-section-title" style="color: ${style.chapterColor}">${s.title}</h1>
+              <div class="chapter-content">${s.html}</div>
+            </section>
+          `);
+        });
+
+        // 3. Generated TOC
+        previewSections.push(`
+          <section class="preview-chapter toc-page">
+            <h1 class="preview-section-title" style="color: ${style.chapterColor}; margin-bottom: 60px;">Contents</h1>
+            <div class="preview-toc-list" style="padding: 0 60px;">
+              ${allTocEntries.map((entry, i) => `
+                <div style="display: flex; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px dotted rgba(0,0,0,0.1); padding-bottom: 8px; font-size: ${entry.level === 1 ? '1.1em' : '0.9em'}; padding-left: ${(entry.level - 1) * 20}px;">
+                  <span style="font-weight: ${entry.level === 1 ? '600' : '400'}; font-family: 'Lora', serif; color: #1a1a1a;">${entry.text}</span>
+                  <span style="opacity: 0.3; font-family: sans-serif; font-size: 0.7em; align-self: flex-end;">${entry.level === 1 ? 'CH ' + (i + 1) : ''}</span>
+                </div>
+              `).join('')}
+            </div>
           </section>
-        `).join('');
+        `);
+
+        // 4. Body Content
+        bodyContent.forEach(s => {
+          previewSections.push(`
+            <section class="preview-chapter">
+              <h1 class="preview-section-title" style="color: ${style.chapterColor}">${s.title}</h1>
+              <div class="chapter-content">${s.html}</div>
+            </section>
+          `);
+        });
+
+        // 5. Back Matter
+        backMatter.forEach(s => {
+          previewSections.push(`
+            <section class="preview-chapter">
+              <h1 class="preview-section-title" style="color: ${style.chapterColor}">${s.title}</h1>
+              <div class="chapter-content">${s.html}</div>
+            </section>
+          `);
+        });
+
+        const combinedHtml = previewSections.join('');
 
         return (
-          <div className="tab-pane center overflow-hidden">
+          <div className="tab-pane scrollable flex flex-col items-center gap-6 py-12 px-4 shadow-inner">
+            <div className="flex bg-white/5 rounded-full p-1 self-center">
+              <button 
+                className={`px-6 py-2 rounded-full text-xs font-bold transition-all ${previewMode === 'paginated' ? 'bg-gold text-black shadow-lg shadow-gold/20' : 'text-gray-400 hover:text-white'}`}
+                onClick={() => setPreviewMode('paginated')}
+              >
+                PAGINATED
+              </button>
+              <button 
+                className={`px-6 py-2 rounded-full text-xs font-bold transition-all ${previewMode === 'vertical' ? 'bg-gold text-black shadow-lg shadow-gold/20' : 'text-gray-400 hover:text-white'}`}
+                onClick={() => setPreviewMode('vertical')}
+              >
+                SCROLLABLE
+              </button>
+            </div>
+
             <div className="device-container animate-fade-in">
               <div className="device-bezel">
                 <div className="device-screen parchment" style={{
@@ -709,33 +798,35 @@ function App() {
                 }}>
                   <div 
                     ref={readerRef}
-                    className="reader-content" 
+                    className={`reader-content custom-scrollbar ${previewMode === 'vertical' ? 'vertical' : ''}`}
                     dangerouslySetInnerHTML={{ __html: combinedHtml }} 
                   />
                 </div>
               </div>
-              <div className="device-controls flex justify-between w-full mt-6 px-12">
-                <button 
-                  className="btn-secondary rounded-full p-4 hover:bg-gold hover:text-white transition-all"
-                  onClick={() => {
-                    readerRef.current?.scrollBy({ left: -readerRef.current.clientWidth, behavior: 'smooth' });
-                  }}
-                >
-                  <ChevronLeft size={24} />
-                </button>
-                <div className="text-secondary text-sm flex flex-col items-center">
-                  <span className="font-bold tracking-widest uppercase text-xs opacity-50">E-Reader Preview</span>
-                  <span className="text-xs opacity-30 mt-1">Simulate EPUB layout</span>
+              {previewMode === 'paginated' && (
+                <div className="device-controls flex justify-between w-full mt-6 px-12">
+                  <button 
+                    className="btn-secondary rounded-full p-4 hover:bg-gold hover:text-white transition-all border-white/5 bg-white/5"
+                    onClick={() => {
+                      readerRef.current?.scrollBy({ left: -readerRef.current.clientWidth, behavior: 'smooth' });
+                    }}
+                  >
+                    <ChevronLeft size={24} />
+                  </button>
+                  <div className="text-secondary text-sm flex flex-col items-center">
+                    <span className="font-bold tracking-widest uppercase text-xs opacity-50">E-Reader Preview</span>
+                    <span className="text-xs opacity-30 mt-1">Paginated book mode</span>
+                  </div>
+                  <button 
+                    className="btn-secondary rounded-full p-4 hover:bg-gold hover:text-white transition-all border-white/5 bg-white/5"
+                    onClick={() => {
+                      readerRef.current?.scrollBy({ left: readerRef.current.clientWidth, behavior: 'smooth' });
+                    }}
+                  >
+                    <ChevronRight size={24} />
+                  </button>
                 </div>
-                <button 
-                  className="btn-secondary rounded-full p-4 hover:bg-gold hover:text-white transition-all"
-                  onClick={() => {
-                    readerRef.current?.scrollBy({ left: readerRef.current.clientWidth, behavior: 'smooth' });
-                  }}
-                >
-                  <ChevronRight size={24} />
-                </button>
-              </div>
+              )}
             </div>
           </div>
         );
@@ -779,7 +870,7 @@ function App() {
             </div>
           </div>
           <div className="header-actions">
-            <button className="btn-secondary">
+            <button className="btn-secondary" onClick={() => setShowSettings(true)}>
               <Settings size={18} />
               Settings
             </button>
@@ -805,6 +896,66 @@ function App() {
             {notification.type === 'success' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
             {notification.message}
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {showSettings && (
+          <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="modal-content"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="modal-header">
+                <h3>Project Settings</h3>
+                <button onClick={() => setShowSettings(false)} className="opacity-50 hover:opacity-100 p-2 hover:bg-white/5 rounded-full transition-all">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="modal-body">
+                <div className="settings-grid">
+                  <div className="settings-section col-span-2">
+                    <label>Workspace Management</label>
+                    <div className="flex gap-4">
+                      <button className="btn-primary flex-1" onClick={saveWorkspace}>
+                        <Download size={18} /> Save Workspace
+                      </button>
+                      <label className="btn-secondary flex-1 cursor-pointer justify-center">
+                        <Plus size={18} /> Load Workspace
+                        <input type="file" hidden accept=".weaver" onChange={loadWorkspace} />
+                      </label>
+                    </div>
+                    <p className="text-[10px] text-secondary mt-2 opacity-50">
+                      Saving your workspace creates a .weaver file you can use to resume your work later.
+                    </p>
+                  </div>
+
+                  <div className="settings-section">
+                    <label>Publisher</label>
+                    <input 
+                      type="text" 
+                      className="glass-input" 
+                      value={metadata.publisher} 
+                      onChange={e => setMetadata({...metadata, publisher: e.target.value})}
+                    />
+                  </div>
+                  <div className="settings-section">
+                    <label>Language Code</label>
+                    <input 
+                      type="text" 
+                      className="glass-input" 
+                      value={metadata.language} 
+                      onChange={e => setMetadata({...metadata, language: e.target.value})}
+                    />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

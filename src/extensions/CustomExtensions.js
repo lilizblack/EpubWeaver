@@ -96,10 +96,10 @@ export const Indent = Extension.create({
         types: this.options.types,
         attributes: {
           indent: {
-            default: 0.2,
-            parseHTML: element => parseFloat(element.style.textIndent) || 0.2,
+            default: 1.0,
+            parseHTML: element => parseFloat(element.style.textIndent) || 1.0,
             renderHTML: attributes => {
-              if (!attributes.indent) return { style: 'text-indent: 0.2em' };
+              if (!attributes.indent) return { style: 'text-indent: 1.0em' };
               return { style: `text-indent: ${attributes.indent}em` };
             },
           },
