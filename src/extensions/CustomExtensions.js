@@ -121,7 +121,7 @@ export const ParagraphSpacing = Extension.create({
   addOptions() {
     return {
       types: ['paragraph'],
-      defaultSpacing: '6',
+      defaultSpacing: '3',
     };
   },
   addGlobalAttributes() {
@@ -130,10 +130,10 @@ export const ParagraphSpacing = Extension.create({
         types: this.options.types,
         attributes: {
           spacing: {
-            default: null,
-            parseHTML: element => element.style.marginBottom?.replace('px', ''),
+            default: '3',
+            parseHTML: element => element.style.marginBottom?.replace('px', '') || '3',
             renderHTML: attributes => {
-              if (!attributes.spacing) return {};
+              if (!attributes.spacing) return { style: 'margin-bottom: 3px' };
               return { style: `margin-bottom: ${attributes.spacing}px` };
             },
           },
@@ -156,19 +156,45 @@ export const ParagraphSpacing = Extension.create({
 import { Node, mergeAttributes } from '@tiptap/core';
 import { Image as TiptapImage } from '@tiptap/extension-image';
 
+import { ReactNodeViewRenderer } from '@tiptap/react';
+import ImageNodeView from '../components/ImageNodeView';
+
 export const ResizableImage = TiptapImage.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
       width: {
-        default: null,
-        parseHTML: element => element.style.width || element.getAttribute('width') || null,
+        default: '100%',
+        parseHTML: element => element.style.width || element.getAttribute('width') || '100%',
         renderHTML: attributes => {
           if (!attributes.width) return {};
-          return { style: `width: ${attributes.width}; height: auto;` };
+          return { style: `width: ${attributes.width};` };
+        },
+      },
+      float: {
+        default: 'none',
+        parseHTML: element => element.style.float || 'none',
+        renderHTML: attributes => {
+          if (!attributes.float || attributes.float === 'none') return {};
+          const margin = attributes.float === 'left' ? '0.5em 20px 0.5em 0' : '0.5em 0 0.5em 20px';
+          return { style: `float: ${attributes.float}; margin: ${margin};` };
+        },
+      },
+      display: {
+        default: 'block',
+        parseHTML: element => element.style.display || 'block',
+        renderHTML: attributes => {
+          let style = `display: ${attributes.display};`;
+          if (attributes.display === 'block' && (!attributes.float || attributes.float === 'none')) {
+            style += ' margin: 20px auto;';
+          }
+          return { style };
         },
       },
     };
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(ImageNodeView);
   },
 });
 

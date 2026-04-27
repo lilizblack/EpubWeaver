@@ -21,7 +21,8 @@ import {
   ChevronDown,
   GripVertical,
   X,
-  Save
+  Save,
+  RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import mammoth from 'mammoth';
@@ -70,6 +71,31 @@ function App() {
   const [editingTitleId, setEditingTitleId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
 
+  const startNewProject = () => {
+    if (window.confirm('Are you sure you want to start a new project? All unsaved progress will be lost.')) {
+      setSections([
+        { id: 'title-page', title: 'Title Page', type: 'front', html: '<h1>Title</h1>' },
+        { id: 'copyright', title: 'Copyright', type: 'front', html: '<p>© 2026 Author Name. All rights reserved.</p>' },
+        { id: 'dedication', title: 'Dedication', type: 'front', html: '<p style="text-align: center; margin-top: 20%; font-style: italic;">To someone special...</p>' },
+        { id: 'chapter-1', title: 'Chapter 1', type: 'body', html: '<h2>Chapter One</h2><p>Start writing here...</p>' },
+        { id: 'acknowledgements', title: 'Acknowledgements', type: 'back', html: '<h1>Acknowledgements</h1><p>I would like to thank...</p>' },
+        { id: 'about-author', title: 'About Author', type: 'back', html: '<h1>About the Author</h1><p>Author biography here...</p>' }
+      ]);
+      setActiveSectionId('chapter-1');
+      setMetadata({
+        title: 'Untitled Masterpiece',
+        author: 'Anonymous',
+        description: '',
+        language: 'en',
+        publisher: 'Self Published',
+        coverArt: null
+      });
+      setStyle(DEFAULT_STYLE);
+      setActiveTab('upload');
+      notify('New project started!', 'success');
+    }
+  };
+
   // --- Refs ---
   const readerRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -94,7 +120,115 @@ function App() {
     return entries;
   }, [sections]);
 
+  const combinedHtml = React.useMemo(() => {
+    // Generate a structured preview with Cover and TOC
+    const frontMatter = sections.filter(s => s.type === 'front');
+    const bodyContent = sections.filter(s => s.type === 'body');
+    const backMatter = sections.filter(s => s.type === 'back');
+
+    let previewSections = [];
+
+    // 1. Cover Art
+    if (metadata.coverArt) {
+      previewSections.push(`
+        <section class="preview-chapter cover-page" style="text-align: center;">
+          <img src="${metadata.coverArt}" style="max-width: 100%; max-height: 80vh; object-fit: contain; border-radius: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);" />
+        </section>
+      `);
+    }
+
+    // 2. Front Matter
+    frontMatter.forEach(s => {
+      previewSections.push(`
+        <section class="preview-chapter">
+          <h1 class="preview-section-title" style="color: ${style.chapterColor}">${s.title}</h1>
+          <div class="chapter-content">${s.html}</div>
+        </section>
+      `);
+    });
+
+    // 3. Generated TOC
+    previewSections.push(`
+      <section class="preview-chapter toc-page">
+        <h1 class="preview-section-title" style="color: ${style.chapterColor}; margin-bottom: 60px;">Contents</h1>
+        <div class="preview-toc-list" style="padding: 0 60px;">
+          ${allTocEntries.map((entry, i) => `
+            <div style="display: flex; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px dotted rgba(0,0,0,0.1); padding-bottom: 8px; font-size: ${entry.level === 1 ? '1.1em' : '0.9em'}; padding-left: ${(entry.level - 1) * 20}px;">
+              <span style="font-weight: ${entry.level === 1 ? '600' : '400'}; font-family: 'Lora', serif; color: #1a1a1a;">${entry.text}</span>
+              <span style="opacity: 0.3; font-family: sans-serif; font-size: 0.7em; align-self: flex-end;">${entry.level === 1 ? 'CH ' + (i + 1) : ''}</span>
+            </div>
+          `).join('')}
+        </div>
+      </section>
+    `);
+
+    // 4. Body Content
+    bodyContent.forEach(s => {
+      previewSections.push(`
+        <section class="preview-chapter">
+          <h1 class="preview-section-title" style="color: ${style.chapterColor}">${s.title}</h1>
+          <div class="chapter-content">${s.html}</div>
+        </section>
+      `);
+    });
+
+    // 5. Back Matter
+    backMatter.forEach(s => {
+      previewSections.push(`
+        <section class="preview-chapter">
+          <h1 class="preview-section-title" style="color: ${style.chapterColor}">${s.title}</h1>
+          <div class="chapter-content">${s.html}</div>
+        </section>
+      `);
+    });
+
+    return previewSections.join('');
+  }, [sections, metadata.coverArt, style.chapterColor, allTocEntries]);
+
   // --- Effects ---
+  useEffect(() => {
+    if (activeTab !== 'preview' || !readerRef.current) return;
+
+    const reader = readerRef.current;
+    let isScrolling = false;
+
+    const handleWheel = (e) => {
+      if (previewMode === 'paginated') {
+        e.preventDefault();
+        if (isScrolling) return;
+        
+        isScrolling = true;
+        const width = reader.clientWidth;
+        const direction = e.deltaY > 0 || e.deltaX > 0 ? 1 : -1;
+        
+        reader.scrollLeft += direction * width;
+        
+        setTimeout(() => {
+          isScrolling = false;
+        }, 300); // 300ms debounce to prevent multiple jumps
+      }
+    };
+
+    const handleKeyDown = (e) => {
+      if (previewMode === 'paginated') {
+        const width = reader.clientWidth;
+        if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+          reader.scrollLeft += width;
+        } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+          reader.scrollLeft -= width;
+        }
+      }
+    };
+
+    reader.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      reader.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activeTab, previewMode, combinedHtml]);
+
   useEffect(() => {
     const activePill = document.querySelector('.section-pill.active');
     if (activePill) {
@@ -122,6 +256,11 @@ function App() {
         const text = await file.text();
         html = `<p>${text.replace(/\n/g, '</p><p>')}</p>`;
       }
+
+      // Detect and normalize scene breaks (***, * * *, ---, ###, ___)
+      // These are often used in manuscripts to denote scene dividers
+      // We catch variations with 3 or more symbols and optional spaces
+      html = html.replace(/<p>\s*([\*-_#]\s*){3,}\s*<\/p>/g, '<hr />');
 
       // naive split into one main chapter for now, or use splitIntoChapters helper
       const newChapters = splitIntoChapters(html);
@@ -165,7 +304,7 @@ function App() {
         currentChapter = { 
           id: Date.now() + index, 
           title: child.innerText || `Chapter ${chapters.length + 1}`, 
-          content: '', 
+          content: child.outerHTML, // Include the heading in the content itself
           images: [] 
         };
       } else {
@@ -791,89 +930,32 @@ function App() {
           </div>
         );
       case 'preview':
-        // Generate a structured preview with Cover and TOC
-        const frontMatter = sections.filter(s => s.type === 'front');
-        const bodyContent = sections.filter(s => s.type === 'body');
-        const backMatter = sections.filter(s => s.type === 'back');
-
-        let previewSections = [];
-
-        // 1. Cover Art
-        if (metadata.coverArt) {
-          previewSections.push(`
-            <section class="preview-chapter cover-page" style="display: flex; align-items: center; justify-content: center; height: 100%;">
-              <img src="${metadata.coverArt}" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);" />
-            </section>
-          `);
-        }
-
-        // 2. Front Matter
-        frontMatter.forEach(s => {
-          previewSections.push(`
-            <section class="preview-chapter">
-              <h1 class="preview-section-title" style="color: ${style.chapterColor}">${s.title}</h1>
-              <div class="chapter-content">${s.html}</div>
-            </section>
-          `);
-        });
-
-        // 3. Generated TOC
-        previewSections.push(`
-          <section class="preview-chapter toc-page">
-            <h1 class="preview-section-title" style="color: ${style.chapterColor}; margin-bottom: 60px;">Contents</h1>
-            <div class="preview-toc-list" style="padding: 0 60px;">
-              ${allTocEntries.map((entry, i) => `
-                <div style="display: flex; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px dotted rgba(0,0,0,0.1); padding-bottom: 8px; font-size: ${entry.level === 1 ? '1.1em' : '0.9em'}; padding-left: ${(entry.level - 1) * 20}px;">
-                  <span style="font-weight: ${entry.level === 1 ? '600' : '400'}; font-family: 'Lora', serif; color: #1a1a1a;">${entry.text}</span>
-                  <span style="opacity: 0.3; font-family: sans-serif; font-size: 0.7em; align-self: flex-end;">${entry.level === 1 ? 'CH ' + (i + 1) : ''}</span>
-                </div>
-              `).join('')}
-            </div>
-          </section>
-        `);
-
-        // 4. Body Content
-        bodyContent.forEach(s => {
-          previewSections.push(`
-            <section class="preview-chapter">
-              <h1 class="preview-section-title" style="color: ${style.chapterColor}">${s.title}</h1>
-              <div class="chapter-content">${s.html}</div>
-            </section>
-          `);
-        });
-
-        // 5. Back Matter
-        backMatter.forEach(s => {
-          previewSections.push(`
-            <section class="preview-chapter">
-              <h1 class="preview-section-title" style="color: ${style.chapterColor}">${s.title}</h1>
-              <div class="chapter-content">${s.html}</div>
-            </section>
-          `);
-        });
-
-        const combinedHtml = previewSections.join('');
-
         return (
-          <div className="tab-pane scrollable flex flex-col items-center gap-6 py-12 px-4 shadow-inner">
-            <div className="flex bg-white/5 rounded-full p-1 self-center">
+          <div className="tab-pane flex flex-col items-center py-12 px-4 shadow-inner overflow-hidden">
+            <div className="flex bg-white/5 rounded-full p-1 mb-8 shrink-0 z-10">
               <button 
-                className={`px-6 py-2 rounded-full text-xs font-bold transition-all ${previewMode === 'paginated' ? 'bg-gold text-black shadow-lg shadow-gold/20' : 'text-gray-400 hover:text-white'}`}
-                onClick={() => setPreviewMode('paginated')}
+                className={`px-8 py-2.5 rounded-full text-xs font-bold transition-all ${previewMode === 'paginated' ? 'bg-gold text-black shadow-lg shadow-gold/20' : 'text-gray-400 hover:text-white'}`}
+                onClick={() => {
+                  setPreviewMode('paginated');
+                  if (readerRef.current) readerRef.current.scrollLeft = 0;
+                }}
               >
                 PAGINATED
               </button>
               <button 
-                className={`px-6 py-2 rounded-full text-xs font-bold transition-all ${previewMode === 'vertical' ? 'bg-gold text-black shadow-lg shadow-gold/20' : 'text-gray-400 hover:text-white'}`}
-                onClick={() => setPreviewMode('vertical')}
+                className={`px-8 py-2.5 rounded-full text-xs font-bold transition-all ${previewMode === 'vertical' ? 'bg-gold text-black shadow-lg shadow-gold/20' : 'text-gray-400 hover:text-white'}`}
+                onClick={() => {
+                  setPreviewMode('vertical');
+                  if (readerRef.current) readerRef.current.scrollTop = 0;
+                }}
               >
                 SCROLLABLE
               </button>
             </div>
 
-            <div className="device-container animate-fade-in">
-              <div className="device-bezel">
-                <div className="device-screen parchment" style={{
+            <div className="device-container flex-1 min-h-0 animate-fade-in relative flex flex-col">
+              <div className="device-bezel flex-1 min-h-0 flex flex-col relative z-0">
+                <div className="device-screen parchment flex-1 relative" style={{
                   fontFamily: style.fontFamily,
                   fontSize: `${style.fontSize}px`,
                   lineHeight: style.lineHeight,
@@ -884,34 +966,53 @@ function App() {
                   <div 
                     ref={readerRef}
                     className={`reader-content custom-scrollbar ${previewMode === 'vertical' ? 'vertical' : ''}`}
-                    dangerouslySetInnerHTML={{ __html: combinedHtml }} 
+                    style={{ position: 'relative', height: '100%', width: '100%', zIndex: 5 }}
+                    dangerouslySetInnerHTML={{ __html: combinedHtml || '<div style="padding: 40px; text-align: center; opacity: 0.5;">No content to preview. Import a manuscript or add chapters to begin.</div>' }} 
                   />
+                  
+                  {previewMode === 'paginated' && (
+                    <>
+                      <div className="absolute inset-y-0 left-0 w-20 flex items-center justify-center z-50 pointer-events-none">
+                        <button 
+                          className="w-14 h-14 rounded-full bg-black/10 hover:bg-black/20 active:scale-95 text-black/40 hover:text-black/80 transition-all flex items-center justify-center border border-black/5 shadow-lg pointer-events-auto"
+                          title="Previous Page (A or ←)"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (readerRef.current) {
+                              const width = readerRef.current.clientWidth;
+                              readerRef.current.scrollLeft -= width;
+                            }
+                          }}
+                        >
+                          <ChevronLeft size={32} />
+                        </button>
+                      </div>
+                      <div className="absolute inset-y-0 right-0 w-20 flex items-center justify-center z-50 pointer-events-none">
+                        <button 
+                          className="w-14 h-14 rounded-full bg-black/10 hover:bg-black/20 active:scale-95 text-black/40 hover:text-black/80 transition-all flex items-center justify-center border border-black/5 shadow-lg pointer-events-auto"
+                          title="Next Page (D or →)"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (readerRef.current) {
+                              const width = readerRef.current.clientWidth;
+                              readerRef.current.scrollLeft += width;
+                            }
+                          }}
+                        >
+                          <ChevronRight size={32} />
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
-              {previewMode === 'paginated' && (
-                <div className="device-controls flex justify-between w-full mt-6 px-12">
-                  <button 
-                    className="btn-secondary rounded-full p-4 hover:bg-gold hover:text-white transition-all border-white/5 bg-white/5"
-                    onClick={() => {
-                      readerRef.current?.scrollBy({ left: -readerRef.current.clientWidth, behavior: 'smooth' });
-                    }}
-                  >
-                    <ChevronLeft size={24} />
-                  </button>
-                  <div className="text-secondary text-sm flex flex-col items-center">
-                    <span className="font-bold tracking-widest uppercase text-xs opacity-50">E-Reader Preview</span>
-                    <span className="text-xs opacity-30 mt-1">Paginated book mode</span>
-                  </div>
-                  <button 
-                    className="btn-secondary rounded-full p-4 hover:bg-gold hover:text-white transition-all border-white/5 bg-white/5"
-                    onClick={() => {
-                      readerRef.current?.scrollBy({ left: readerRef.current.clientWidth, behavior: 'smooth' });
-                    }}
-                  >
-                    <ChevronRight size={24} />
-                  </button>
-                </div>
-              )}
+
+              <div className="text-secondary text-sm flex flex-col items-center mt-6 shrink-0">
+                <span className="font-bold tracking-widest uppercase text-[10px] opacity-40">E-Reader Preview</span>
+                <span className="text-[10px] opacity-20 mt-1">{previewMode === 'paginated' ? 'Use arrows to flip pages' : 'Scroll vertically to read'}</span>
+              </div>
             </div>
           </div>
         );
@@ -953,6 +1054,13 @@ function App() {
               <span className="dot" />
               {metadata.title}
             </div>
+            <button 
+              className="btn-secondary h-8 px-3 flex items-center gap-2 bg-white/5 border-white/10 hover:bg-gold/20 hover:border-gold/30 hover:text-gold transition-all text-[10px] font-bold uppercase tracking-widest"
+              onClick={startNewProject}
+            >
+              <RotateCcw size={12} />
+              Start New
+            </button>
           </div>
           <div className="header-actions flex items-center gap-3">
             <button 

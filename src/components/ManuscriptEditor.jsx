@@ -37,7 +37,8 @@ import {
   ArrowRightFromLine,
   ChevronUp,
   Scaling,
-  Crop
+  Crop,
+  Layout
 } from 'lucide-react';
 
 const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) => {
@@ -131,31 +132,34 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
     return () => scroller.removeEventListener('scroll', onScroll);
   }, []);
 
+  const extensions = React.useMemo(() => [
+    StarterKit.configure({
+      heading: false,
+    }),
+    Heading.configure({
+      levels: [1, 2, 3],
+    }),
+    Underline,
+    TextStyle,
+    Color,
+    Highlight,
+    ResizableImage.configure({
+      inline: true,
+      allowBase64: true,
+    }),
+    TextAlign.configure({
+      types: ['heading', 'paragraph', 'image'],
+      defaultAlignment: 'justify',
+    }),
+    FontFamily,
+    FontSize,
+    LineHeight,
+    Indent,
+    ParagraphSpacing,
+  ], []);
+
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: false,
-      }),
-      Heading.configure({
-        levels: [1, 2, 3],
-      }),
-      Underline,
-      TextStyle,
-      Color,
-      Highlight,
-      ResizableImage.configure({
-        inline: true,
-        allowBase64: true,
-      }),
-      TextAlign.configure({
-        types: ['heading', 'paragraph', 'image'],
-      }),
-      FontFamily,
-      FontSize,
-      LineHeight,
-      Indent,
-      ParagraphSpacing,
-    ],
+    extensions,
     content: content,
     onSelectionUpdate: ({ editor }) => {
       setSelectionUpdate(prev => prev + 1);
@@ -186,6 +190,9 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
         }
       });
       onUpdateTOC(headers);
+    },
+    parseOptions: {
+      preserveWhitespace: 'full',
     },
   });
 
@@ -414,6 +421,43 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
                     </button>
                   </div>
 
+                  {/* Layout Presets (Square/Wrap) */}
+                  <div className="img-transform-divider" />
+                  <div className="img-transform-header">
+                    <Layout size={14} />
+                    <span>Wrapping</span>
+                  </div>
+                  <div className="img-presets">
+                    <button 
+                      className={`img-preset-btn${editor.getAttributes('image').display === 'inline-block' && editor.getAttributes('image').float === 'none' ? ' active' : ''}`}
+                      onClick={() => editor.chain().focus().updateAttributes('image', { float: 'none', display: 'inline-block' }).run()}
+                      title="In line with text"
+                    >
+                      In Line
+                    </button>
+                    <button 
+                      className={`img-preset-btn${editor.getAttributes('image').float === 'left' ? ' active' : ''}`}
+                      onClick={() => editor.chain().focus().updateAttributes('image', { float: 'left', display: 'inline-block' }).run()}
+                      title="Text wraps around image (Left)"
+                    >
+                      Square Left
+                    </button>
+                    <button 
+                      className={`img-preset-btn${editor.getAttributes('image').display === 'block' ? ' active' : ''}`}
+                      onClick={() => editor.chain().focus().updateAttributes('image', { float: 'none', display: 'block' }).run()}
+                      title="Centered on its own line"
+                    >
+                      Centered
+                    </button>
+                    <button 
+                      className={`img-preset-btn${editor.getAttributes('image').float === 'right' ? ' active' : ''}`}
+                      onClick={() => editor.chain().focus().updateAttributes('image', { float: 'right', display: 'inline-block' }).run()}
+                      title="Text wraps around image (Right)"
+                    >
+                      Square Right
+                    </button>
+                  </div>
+
                   {/* Crop button */}
                   <div className="img-transform-divider" />
                   <button
@@ -492,11 +536,11 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
 
               <div className="control-group">
                 <label className="text-[10px] uppercase tracking-tighter text-secondary mb-2 block">
-                  Paragraph Spacing ({editor?.getAttributes('paragraph').spacing || 6}px)
+                  Paragraph Spacing ({editor?.getAttributes('paragraph').spacing || 3}px)
                 </label>
                 <input 
                   type="range" min="0" max="60" step="1"
-                  value={editor?.getAttributes('paragraph').spacing || 6}
+                  value={editor?.getAttributes('paragraph').spacing || 3}
                   onChange={e => editor.chain().focus().setParagraphSpacing(e.target.value).run()}
                   className="w-full accent-gold"
                 />
@@ -1072,6 +1116,14 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
           font-style: italic;
           color: #444;
           margin: 2em 0;
+        }
+
+        .ProseMirror hr {
+          border: none;
+          border-top: 2px solid var(--header-color);
+          width: 30%;
+          margin: 3em auto;
+          opacity: 0.4;
         }
 
         .ProseMirror img {

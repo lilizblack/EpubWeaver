@@ -89,6 +89,21 @@ body {
   text-align: left;
 }
 
+.chapter-content {
+  text-align: justify;
+}
+
+.preview-chapter.cover-page {
+  display: block;
+  text-align: center;
+  break-after: column;
+}
+
+.preview-chapter.cover-page img {
+  display: inline-block;
+  margin: 0 auto;
+}
+
 .nav-item:hover {
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-primary);
@@ -362,59 +377,94 @@ body {
 /* Device Mockup */
 .device-container {
   width: 100%;
-  max-width: 800px;
-  margin: 0 auto;
+  max-width: 500px;
+  height: 700px;
+  perspective: 1000px;
 }
 
 .device-bezel {
-  background: #111;
-  padding: 30px 15px;
-  border-radius: 30px;
-  border: 1px solid #333;
+  background: #1a1a1a;
+  border-radius: 32px;
+  padding: 12px;
+  box-shadow: 
+    0 50px 100px -20px rgba(0,0,0,0.5),
+    0 30px 60px -30px rgba(0,0,0,0.6),
+    inset 0 2px 2px rgba(255,255,255,0.1);
+  height: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 .device-screen {
-  aspect-ratio: 3/4;
-  background: #f4f1ea;
+  border-radius: 20px;
   overflow: hidden;
   position: relative;
+  height: 100%;
+  background-color: #f4f1ea;
+  background-image: 
+    radial-gradient(circle at 50% 50%, rgba(255,255,255,0.4) 0%, transparent 100%),
+    url("https://www.transparenttextures.com/patterns/natural-paper.png");
+  color: #2c241c;
 }
 
 .reader-content {
+  padding: 40px;
   height: 100%;
-  padding: 40px 60px;
+  width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  column-width: 100%;
+  column-width: calc(500px - 104px); /* Account for padding and scrollbar */
   column-gap: 80px;
-  scroll-behavior: smooth;
+  column-fill: auto;
   scroll-snap-type: x mandatory;
+  text-align: justify;
+  z-index: 1;
+  overscroll-behavior: contain;
 }
 
 .reader-content.vertical {
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-  column-count: 1 !important;
-  display: block !important;
-  height: 100% !important;
-}
-
-.reader-content p {
-  margin-bottom: var(--p-spacing, 0.375em);
-  text-indent: var(--p-indent, 1em);
-  text-align: justify;
-}
-
-.reader-content h1, 
-.reader-content h2, 
-.reader-content h3 {
-  color: var(--header-color, #d4af37);
+  display: block;
+  column-count: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  column-width: auto;
+  scroll-snap-type: none;
 }
 
 .preview-chapter {
+  margin-bottom: 4rem;
   break-inside: avoid-column;
-  scroll-snap-align: start;
-  margin-bottom: 40px;
+}
+
+.preview-section-title {
+  font-family: var(--font-header);
+  font-size: 2rem;
+  margin-top: 0;
+  margin-bottom: 2rem;
+  text-align: center;
+  color: var(--header-color, #2c2c2c);
+  border-bottom: 1px solid rgba(0,0,0,0.1);
+  padding-bottom: 1rem;
+}
+
+.chapter-content p {
+  margin-bottom: var(--p-spacing, 1em);
+  text-indent: var(--p-indent, 0);
+  line-height: inherit;
+}
+
+.chapter-content p:first-of-type {
+  text-indent: 0;
+}
+
+.reader-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 2rem auto;
+  display: block;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 
 .glass-input {
@@ -445,6 +495,25 @@ body {
 }
 
 /* Editor Styles Integration */
+.ProseMirror {
+  outline: none !important;
+  text-align: justify;
+}
+
+.ProseMirror p {
+  text-align: justify;
+  margin-bottom: var(--p-spacing, 3px);
+  text-indent: var(--p-indent, 1.0em);
+}
+
+.ProseMirror p:first-of-type {
+  text-indent: 0;
+}
+
+.ProseMirror h1, .ProseMirror h2, .ProseMirror h3 {
+  text-align: center;
+}
+
 .editor-workspace-scroll {
   overflow-y: auto;
   height: 100%;
@@ -599,8 +668,63 @@ body {
   margin-left: auto;
 }
 
-/* Ensure the preview container stretches to allow scrolling */
-.device-container {
+/* Footer padding for scrollability */
+.tab-pane::after {
+  content: "";
+  display: block;
+  height: 80px;
   flex-shrink: 0;
-  margin-bottom: 100px;
+}
+
+/* Image Resizer & Layout Styles */
+.image-resizer-wrapper {
+  display: inline-block;
+  line-height: 0;
+  max-width: 100%;
+  transition: box-shadow 0.2s ease-in-out, margin 0.2s ease;
+}
+
+.transform-bounding-box {
+  transition: outline 0.2s ease;
+}
+
+.image-resizer-wrapper.is-selected .transform-bounding-box {
+  outline: 2px dashed var(--accent-color) !important;
+}
+
+.image-resizer-wrapper img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  user-select: none;
+}
+
+/* Ensure floats work in the editor */
+.ProseMirror .image-resizer-wrapper[style*='float: left'] {
+  margin: 0.5em 20px 0.5em 0 !important;
+}
+
+.ProseMirror .image-resizer-wrapper[style*='float: right'] {
+  margin: 0.5em 0 0.5em 20px !important;
+}
+
+.ProseMirror .image-resizer-wrapper[style*='display: block'] {
+  margin: 20px auto !important;
+}
+
+/* Image Transform Panel Handles */
+.image-transform-handle {
+  width: 10px;
+  height: 10px;
+  background: var(--accent-color);
+  border: 1.5px solid white;
+  border-radius: 2px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  z-index: 100;
+  transition: transform 0.1s ease;
+}
+
+.image-transform-handle:hover {
+  transform: scale(1.3);
+  background: white;
 }
