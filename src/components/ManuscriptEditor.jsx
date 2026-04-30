@@ -158,6 +158,8 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
     ParagraphSpacing,
   ], []);
 
+  const updateTimeoutRef = React.useRef(null);
+
   const editor = useEditor({
     extensions,
     content: content,
@@ -169,32 +171,41 @@ const ManuscriptEditor = ({ content, onChange, onUpdateTOC, style, setStyle }) =
       if (node && node.type.name === 'image') {
         const rawWidth = node.attrs.width;
         const pct = rawWidth ? parseInt(rawWidth) : 100;
-        imagePosRef.current = selection.from; // save position for crop callback
+        imagePosRef.current = selection.from; // save position for callback
         setSelectedImage({ width: isNaN(pct) ? 100 : pct });
       } else {
         setSelectedImage(null);
       }
     },
     onUpdate: ({ editor }) => {
-      const html = editor.getHTML();
-      onChange(html);
-      
-      const headers = [];
-      editor.state.doc.descendants((node) => {
-        // h3 is a visual sub-section style only — intentionally excluded from TOC
-        if (node.type.name === 'heading' && node.attrs.level !== 3) {
-          headers.push({
-            level: node.attrs.level,
-            text: node.textContent,
-          });
-        }
-      });
-      onUpdateTOC(headers);
+      // Debounce to prevent massive re-renders of the whole book on every key
+      if (updateTimeoutRef.current) clearTimeout(updateTimeoutRef.current);
+      updateTimeoutRef.current = setTimeout(() => {
+        const html = editor.getHTML();
+        onChange(html);
+        
+        const headers = [];
+        editor.state.doc.descendants((node) => {
+          if (node.type.name === 'heading' && node.attrs.level !== 3) {
+            headers.push({
+              level: node.attrs.level,
+              text: node.textContent,
+            });
+          }
+        });
+        onUpdateTOC(headers);
+      }, 500);
     },
     parseOptions: {
       preserveWhitespace: 'full',
     },
   });
+
+  React.useEffect(() => {
+    return () => {
+      if (updateTimeoutRef.current) clearTimeout(updateTimeoutRef.current);
+    };
+  }, []);
 
   if (!editor) {
     return <div className="p-8 glass text-center">Loading Editor...</div>;

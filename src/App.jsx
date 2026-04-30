@@ -71,6 +71,11 @@ function App() {
   const [editingTitleId, setEditingTitleId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
 
+  const sectionsRef = useRef(sections);
+  useEffect(() => {
+    sectionsRef.current = sections;
+  }, [sections]);
+
   const startNewProject = () => {
     if (window.confirm('Are you sure you want to start a new project? All unsaved progress will be lost.')) {
       setSections([
@@ -102,6 +107,8 @@ function App() {
   const coverInputRef = useRef(null);
 
   const allTocEntries = React.useMemo(() => {
+    if (activeTab !== 'toc' && activeTab !== 'preview' && !isExporting) return [];
+    
     const entries = [];
     sections.forEach(section => {
       if (section.type === 'front') return;
@@ -118,9 +125,13 @@ function App() {
       });
     });
     return entries;
-  }, [sections]);
+  }, [sections, activeTab, isExporting]);
 
   const combinedHtml = React.useMemo(() => {
+    // Optimization: Don't generate the massive combined HTML if we aren't previewing or exporting
+    // This saves a lot of RAM and CPU cycles while typing in the editor
+    if (activeTab !== 'preview' && !isExporting) return '';
+
     // Generate a structured preview with Cover and TOC
     const frontMatter = sections.filter(s => s.type === 'front');
     const bodyContent = sections.filter(s => s.type === 'body');
@@ -183,7 +194,7 @@ function App() {
     });
 
     return previewSections.join('');
-  }, [sections, metadata.coverArt, style.chapterColor, allTocEntries]);
+  }, [sections, metadata.coverArt, style.chapterColor, allTocEntries, activeTab, isExporting]);
 
   // --- Effects ---
   useEffect(() => {
@@ -249,7 +260,74 @@ function App() {
     try {
       let html = '';
       if (file.name.endsWith('.docx')) {
-        const arrayBuffer = await file.arrayBuffer();
+        let arrayBuffer = await file.arrayBuffer();
+        
+        // --- PRE-PROCESS DOCX to detect Auto-Formatted Scene Breaks ---
+        // Word often converts '***' into a paragraph with a dotted bottom border.
+        // Mammoth ignores borders, so we manually intercept them and inject '***'.
+        try {
+          const zip = await JSZip.loadAsync(arrayBuffer);
+          const docXmlFile = zip.file("word/document.xml");
+          
+          if (docXmlFile) {
+            let xmlString = await docXmlFile.async("string");
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlString, "text/xml");
+            
+            // Get all w:pBdr elements (Paragraph Borders)
+            let pBdrs = xmlDoc.getElementsByTagNameNS ? xmlDoc.getElementsByTagNameNS("*", "pBdr") : [];
+            if (!pBdrs || pBdrs.length === 0) pBdrs = xmlDoc.getElementsByTagName("w:pBdr");
+            
+            let modified = false;
+            
+            // Iterate backwards to avoid messing up live collections when inserting
+            for (let i = pBdrs.length - 1; i >= 0; i--) {
+              const pBdr = pBdrs[i];
+              
+              // Check if there is a bottom border inside
+              let hasBottom = false;
+              for (let j = 0; j < pBdr.childNodes.length; j++) {
+                const nodeName = pBdr.childNodes[j].nodeName;
+                if (nodeName === "w:bottom" || nodeName === "bottom") hasBottom = true;
+              }
+              
+              if (hasBottom) {
+                // Traverse up to find the paragraph <w:p>
+                let p = pBdr.parentNode;
+                while (p && p.nodeName !== "w:p" && p.nodeName !== "p") {
+                  p = p.parentNode;
+                }
+                
+                if (p) {
+                  const wNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+                  const newP = xmlDoc.createElementNS(wNS, "w:p");
+                  const newR = xmlDoc.createElementNS(wNS, "w:r");
+                  const newT = xmlDoc.createElementNS(wNS, "w:t");
+                  newT.textContent = "***";
+                  newR.appendChild(newT);
+                  newP.appendChild(newR);
+                  
+                  if (p.nextSibling) {
+                    p.parentNode.insertBefore(newP, p.nextSibling);
+                  } else {
+                    p.parentNode.appendChild(newP);
+                  }
+                  modified = true;
+                }
+              }
+            }
+            
+            if (modified) {
+              const serializer = new XMLSerializer();
+              xmlString = serializer.serializeToString(xmlDoc);
+              zip.file("word/document.xml", xmlString);
+              arrayBuffer = await zip.generateAsync({ type: "arraybuffer" });
+            }
+          }
+        } catch (err) {
+          console.warn("Could not pre-process DOCX for scene breaks:", err);
+        }
+        
         const result = await mammoth.convertToHtml({ arrayBuffer });
         html = result.value;
       } else {
@@ -393,7 +471,11 @@ function App() {
 
   const handleExport = async () => {
     setIsExporting(true);
+    // Wait for any pending debounced editor updates to commit to state
+    await new Promise(resolve => setTimeout(resolve, 600));
+    
     try {
+      const currentSections = sectionsRef.current;
       const zip = new JSZip();
       zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
       zip.file('META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8"?>
@@ -418,7 +500,10 @@ function App() {
       let imageIdx = 0;
       const serializer = new XMLSerializer();
 
-      for (const section of sections) {
+      // Deep TOC arrays
+      const deepTOC = [];
+
+      for (const section of currentSections) {
         // Parse as HTML then serialize to XHTML
         const sectionDoc = new DOMParser().parseFromString(section.html, 'text/html');
         const images = Array.from(sectionDoc.querySelectorAll('img'));
@@ -445,6 +530,30 @@ function App() {
           }
         }
 
+        // Build Deep TOC for this section
+        const subToc = [];
+        if (section.type === 'body' || section.type === 'back') {
+          const headings = Array.from(sectionDoc.querySelectorAll('h1, h2'));
+          headings.forEach((h, idx) => {
+            if (!h.id) {
+              const safeText = (h.textContent || '').replace(/\s+/g, '-').replace(/[^a-zA-Z0-9\-]/g, '').toLowerCase();
+              h.id = `heading-${idx}-${safeText || 'h'}`;
+            }
+            subToc.push({
+              title: h.textContent || 'Untitled',
+              href: `${section.id}.xhtml#${h.id}`,
+              level: parseInt(h.tagName[1])
+            });
+          });
+
+          deepTOC.push({
+            title: section.title,
+            href: `${section.id}.xhtml`,
+            level: 1,
+            children: subToc
+          });
+        }
+
         // Serialize the body content to ensure valid XHTML (self-closing tags, etc.)
         const serializedBody = serializer.serializeToString(sectionDoc.body)
           .replace(/^<body[^>]*>/, '')
@@ -468,9 +577,7 @@ function App() {
         chMeta.push({ id: section.id, fileName, title: section.title, type: section.type });
       }
 
-      const tocListItems = chMeta.filter(c => c.type === 'body' || c.type === 'back');
-
-      // EPUB 3 Navigation Document
+      // EPUB 3 Navigation Document (Deep TOC)
       const nav = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${metadata.language || 'en'}" xml:lang="${metadata.language || 'en'}">
@@ -482,29 +589,57 @@ function App() {
     <nav epub:type="toc" id="toc">
         <h1 class="toc-title">Table of Contents</h1>
         <ol>
-            ${tocListItems.map(c => `<li><a href="${c.fileName}">${c.title}</a></li>`).join('\n')}
+            ${deepTOC.map(c => `
+              <li>
+                <a href="${c.href}">${c.title}</a>
+                ${c.children.length > 0 ? `
+                  <ol>
+                    ${c.children.map(sub => `<li><a href="${sub.href}">${sub.title}</a></li>`).join('\n')}
+                  </ol>
+                ` : ''}
+              </li>
+            `).join('\n')}
         </ol>
     </nav>
 </body>
 </html>`;
       zip.file('OEBPS/nav.xhtml', nav);
 
-      // NCX Fallback for legacy iBooks / Kindle / EPUB 2 readers
+      // NCX Fallback for legacy iBooks / Kindle / EPUB 2 readers (Deep TOC)
+      let ncxNavPoints = '';
+      let ncxIndex = 1;
+      deepTOC.forEach(c => {
+        ncxNavPoints += `
+        <navPoint id="navpoint-${ncxIndex}" playOrder="${ncxIndex}">
+            <navLabel><text>${c.title}</text></navLabel>
+            <content src="${c.href}"/>`;
+        ncxIndex++;
+        
+        if (c.children.length > 0) {
+          c.children.forEach(sub => {
+            ncxNavPoints += `
+            <navPoint id="navpoint-${ncxIndex}" playOrder="${ncxIndex}">
+                <navLabel><text>${sub.title}</text></navLabel>
+                <content src="${sub.href}"/>
+            </navPoint>`;
+            ncxIndex++;
+          });
+        }
+        ncxNavPoints += `
+        </navPoint>`;
+      });
+
       const ncx = `<?xml version="1.0" encoding="UTF-8"?>
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
     <head>
         <meta name="dtb:uid" content="urn:uuid:book-id"/>
-        <meta name="dtb:depth" content="1"/>
+        <meta name="dtb:depth" content="2"/>
         <meta name="dtb:totalPageCount" content="0"/>
         <meta name="dtb:maxPageNumber" content="0"/>
     </head>
     <docTitle><text>${metadata.title}</text></docTitle>
     <navMap>
-        ${tocListItems.map((c, i) => `
-        <navPoint id="navpoint-${i + 1}" playOrder="${i + 1}">
-            <navLabel><text>${c.title}</text></navLabel>
-            <content src="${c.fileName}"/>
-        </navPoint>`).join('\n')}
+        ${ncxNavPoints}
     </navMap>
 </ncx>`;
       zip.file('OEBPS/toc.ncx', ncx);
@@ -775,9 +910,15 @@ function App() {
       )}
 
       <div className="sidebar-footer shrink-0 flex flex-col gap-2 p-5 bg-[#0a0a0a] border-t border-white/5 shadow-[0_-10px_20px_rgba(0,0,0,0.3)]">
-        <button className="btn-secondary w-full justify-center text-xs py-2.5 h-10 hover:bg-white/10" onClick={saveWorkspace}>
-          <Save size={14} className="text-accent" /> Save Workspace
-        </button>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', width: '100%' }}>
+          <button className="btn-secondary justify-center text-xs py-2.5 h-10 hover:bg-white/10" onClick={saveWorkspace} title="Save Workspace" style={{ margin: 0, width: '100%' }}>
+            <Save size={14} className="text-accent" /> Save
+          </button>
+          <label className="btn-secondary justify-center text-xs py-2.5 h-10 hover:bg-white/10 cursor-pointer" title="Load Workspace" style={{ margin: 0, width: '100%' }}>
+            <UploadCloud size={14} className="text-blue-400" /> Load
+            <input type="file" hidden accept=".weaver" onChange={loadWorkspace} />
+          </label>
+        </div>
         <button className="btn-primary w-full text-xs py-2.5 h-10 shadow-lg shadow-gold/10" onClick={handleExport} disabled={isExporting}>
           {isExporting ? 'Processing...' : <><Download size={16} /> Download EPUB</>}
         </button>
@@ -1071,6 +1212,14 @@ function App() {
               <Save size={16} className="text-accent" />
               <span className="hidden md:inline">Save</span>
             </button>
+            <label 
+              className="btn-secondary h-10 px-4 flex items-center gap-2 bg-white/5 border-white/10 hover:bg-white/10 cursor-pointer m-0"
+              title="Load Workspace"
+            >
+              <UploadCloud size={16} className="text-blue-400" />
+              <span className="hidden md:inline">Load</span>
+              <input type="file" hidden accept=".weaver" onChange={loadWorkspace} />
+            </label>
             <button 
               className="btn-secondary h-10 px-4 flex items-center gap-2 bg-white/5 border-white/10 hover:bg-white/10" 
               onClick={() => setShowSettings(true)}
